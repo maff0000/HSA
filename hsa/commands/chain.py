@@ -1,14 +1,27 @@
 """``hsa chain`` — validate a strategy chain and explain what it composes.
 
+Takes either a standalone ``chain`` document or a ``strategy_package``. Real
+chains mostly live embedded inside a package — the contract embeds them
+rather than referencing them — so refusing a package meant the only chains
+that actually exist could not be inspected without first cutting them out to
+a temporary file by hand. The command says which of the two it read.
+
 Two kinds of validation run, in this order, and both must pass:
 
-  1. STRUCTURAL, via ``hsa.contracts`` — the document is a valid ``chain``
-     against the frozen schema.
+  1. STRUCTURAL, via ``hsa.contracts`` — the document is a valid ``chain``,
+     or a valid ``strategy_package`` carrying one, against the frozen schema.
   2. SEMANTIC, via ``hsa.semantics`` — the cross-field rules JSON Schema
      cannot express: unique input handles, contiguous SEQUENCE ordering, an
      optional input that is never the sole cause of a match, a CONTEXT that
-     genuinely sits above its TRIGGER, and every referenced atomic strategy
-     resolving to a real catalogue entry at the exact version pinned.
+     genuinely sits above its TRIGGER and shares its chain with nothing but a
+     TRIGGER, and every referenced atomic strategy resolving to a real
+     catalogue entry at the exact version pinned.
+
+SCOPE, STATED OUT LOUD. On a package this runs the CHAIN checks against the
+embedded chain and not the package-level ones — agreement between package and
+chain, embedded atomics, HERMES coverage. Those are ``hsa validate``\'s, and
+this command says so on stderr rather than letting a caller assume a clean
+run here means the whole package was checked.
 
 Then it explains the composition in plain terms: what each primitive means as
 applied here, what each input contributes, and what the chain preserves —
@@ -26,11 +39,29 @@ mapping from exception type to process exit code.
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any, Mapping
 
 from hsa.contracts import detect_kind, read_json_file, validate_document
-from hsa.errors import ContractError
-from hsa.semantics import Catalogue, check_chain, raise_if_invalid
+from hsa.errors import ContractError, SchemaLoadError
+from hsa.semantics import (
+    CATALOGUE_DEPENDENT_CHECKS,
+    CATALOGUE_DIR_ENV,
+    Catalogue,
+    check_chain,
+    raise_if_invalid,
+)
+
+#: The document kinds this command can read a chain out of.
+ACCEPTED_KINDS: tuple[str, ...] = ("chain", "strategy_package")
+
+#: Package-level checks this command does NOT run. Named so the note printed
+#: on a package says exactly what was left to ``hsa validate``.
+PACKAGE_LEVEL_CHECKS: tuple[str, ...] = (
+    "package.chain_agreement",
+    "package.chain_inputs_embedded",
+    "package.hermes_coverage",
+)
 
 NAME = "chain"
 HELP = "validate a strategy chain and explain its composition"
@@ -62,7 +93,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "path",
         metavar="<file>",
-        help="path to the chain document to validate and explain",
+        help=(
+            "path to the chain document, or to a strategy package whose "
+            "embedded chain is to be validated and explained"
+        ),
     )
     parser.add_argument(
         "--catalogue",
@@ -299,34 +333,101 @@ def _explain(chain: Mapping, catalogue: Catalogue | None) -> str:
 # --- entry point -------------------------------------------------------------
 
 
-def run(args: argparse.Namespace) -> int:
-    document = read_json_file(args.path)
+def _note(text: str) -> None:
+    """Report a check that did not run.
 
+    stderr, and not suppressed by ``--quiet``: quiet suppresses the
+    explanation, and "this check did not run" is a warning, not an
+    explanation.
+    """
+    print("hsa chain: %s" % text, file=sys.stderr)
+
+
+def _extract_chain(document: Any, path: str) -> tuple[Mapping, str, str]:
+    """Return the chain to check, the kind it came from, and its JSON prefix.
+
+    The prefix roots reported paths where the chain actually lives, so a
+    finding in a package points at ``$.chain.inputs[0]`` in the file the
+    caller named — not at ``$.inputs[0]`` in a document that does not exist
+    on disk.
+    """
     kind = detect_kind(document)
-    if kind != "chain":
+    if kind not in ACCEPTED_KINDS:
         raise ContractError(
-            "hsa chain expects a chain document but %s declares kind %r; use "
-            "hsa validate for other contract kinds" % (args.path, kind)
+            "hsa chain expects a chain document or a strategy package "
+            "carrying one, but %s declares kind %r; use hsa validate for "
+            "other contract kinds" % (path, kind)
         )
 
-    validate_document(document, kind="chain", source=args.path)
+    validate_document(document, kind=kind, source=path)
+
+    if kind == "chain":
+        return document, kind, "$"
+
+    chain = document.get("chain")
+    if not isinstance(chain, Mapping):
+        # The schema requires it, so this is unreachable from a validated
+        # package; refusing loudly beats explaining an absent chain.
+        raise ContractError(
+            "%s is a strategy_package but carries no embedded chain object to "
+            "validate" % path
+        )
+    return chain, kind, "$.chain"
+
+
+def run(args: argparse.Namespace) -> int:
+    document = read_json_file(args.path)
+    chain, kind, prefix = _extract_chain(document, args.path)
 
     catalogue = None
-    if not args.no_catalogue:
-        catalogue = Catalogue.from_directory(args.catalogue)
+    if args.no_catalogue:
+        _note(
+            "--no-catalogue: %s did not run for %s"
+            % (", ".join(CATALOGUE_DEPENDENT_CHECKS), args.path)
+        )
+    else:
+        try:
+            catalogue = Catalogue.from_directory(args.catalogue)
+        except SchemaLoadError as exc:
+            raise SchemaLoadError(
+                "semantic validation of %s needs the atomic strategy catalogue "
+                "and it could not be loaded: %s. Pass --catalogue <dir>, set "
+                "%s, or pass --no-catalogue to run the checks that do not need "
+                "it (which leaves %s unrun). Semantic validation is not "
+                "silently skipped."
+                % (args.path, exc, CATALOGUE_DIR_ENV, ", ".join(CATALOGUE_DEPENDENT_CHECKS))
+            ) from exc
 
-    findings = check_chain(document, catalogue=catalogue)
-    raise_if_invalid(findings, "chain", source=args.path)
+    if kind == "strategy_package":
+        _note(
+            "%s is a strategy_package; its embedded chain was validated and "
+            "explained. The package-level checks (%s) were NOT run here — run "
+            "`hsa validate %s` for those."
+            % (args.path, ", ".join(PACKAGE_LEVEL_CHECKS), args.path)
+        )
+
+    findings = check_chain(chain, catalogue=catalogue, prefix=prefix)
+    raise_if_invalid(findings, kind, source=args.path)
 
     if args.quiet:
         return 0
 
-    resolution = (
-        "catalogue resolution skipped"
-        if catalogue is None
-        else "%d inputs resolved against %s" % (len(document.get("inputs") or []), catalogue.source)
+    origin = (
+        "valid chain"
+        if kind == "chain"
+        else "valid strategy_package; its embedded chain is valid"
     )
-    print("%s: valid chain, structurally and semantically (%s)" % (args.path, resolution))
+    if catalogue is None:
+        # See the note in hsa/commands/validate.py: the success line must not
+        # claim the semantic half outright when part of it did not run.
+        tail = "structurally and semantically apart from %s (catalogue " \
+               "resolution skipped)" % ", ".join(CATALOGUE_DEPENDENT_CHECKS)
+    else:
+        tail = "structurally and semantically (%d inputs resolved against %s)" % (
+            len(chain.get("inputs") or []),
+            catalogue.source,
+        )
+    print("%s: %s, %s" % (args.path, origin, tail))
     print()
-    print(_explain(document, catalogue))
+    print(_explain(chain, catalogue))
     return 0

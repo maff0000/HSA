@@ -305,6 +305,107 @@ def test_timeframe_minutes_reads_m_as_minutes():
     assert timeframe_minutes(None) is None
 
 
+# --- chain.context_trigger_roles ---------------------------------------------
+#
+# W3A's gap: chain.schema.json requires only that a CONTEXT_TRIGGER chain
+# *contains* a CONTEXT and *contains* a TRIGGER. ``contains`` is satisfied by
+# one or by five and says nothing about the other roles present, so a third
+# role — whose combination with the other two the doctrine never defines —
+# validated structurally. These pin the semantic layer closing that.
+
+
+def _third_input(role, timeframe, input_id="third_wheel"):
+    return {
+        "input_id": input_id,
+        "strategy_id": "rejection_wick",
+        "strategy_version": "1.0.0",
+        "timeframe_role": role,
+        "timeframe": timeframe,
+        "direction": "INHERIT",
+    }
+
+
+def test_undefined_third_role_under_context_trigger_is_reported(chain_doc, catalogue):
+    """A LOCATION input under CONTEXT_TRIGGER has no defined meaning."""
+    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    chain_doc["timeframe_roles"]["LOCATION"] = "1H"
+
+    finding = _only(
+        check_chain(chain_doc, catalogue=catalogue), "chain.context_trigger_roles"
+    )
+    assert finding.path == "$.inputs[2].timeframe_role"
+    assert "LOCATION" in finding.message
+    assert "only CONTEXT and TRIGGER" in finding.message
+
+
+def test_the_schema_alone_accepts_the_undefined_third_role(chain_doc):
+    """The reason this check has to exist at all.
+
+    If the frozen schema already rejected this, the semantic check would be
+    dead weight. It does not, so the document below validates structurally
+    while carrying a role the doctrine assigns no combination rule to.
+    """
+    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    chain_doc["timeframe_roles"]["LOCATION"] = "1H"
+    assert validate_document(chain_doc) == "chain"
+
+
+def test_second_trigger_under_context_trigger_is_reported(chain_doc, catalogue):
+    """``contains`` is satisfied by one TRIGGER or by two."""
+    chain_doc["inputs"].append(_third_input("TRIGGER", "5M", "second_trigger"))
+
+    finding = _only(
+        check_chain(chain_doc, catalogue=catalogue), "chain.context_trigger_roles"
+    )
+    assert finding.path == "$.inputs[2].timeframe_role"
+    assert "second_trigger" in finding.message
+    assert "exactly one CONTEXT" in finding.message
+
+
+def test_second_context_under_context_trigger_is_reported(chain_doc, catalogue):
+    chain_doc["inputs"].append(_third_input("CONTEXT", "4H", "second_context"))
+
+    findings = check_chain(chain_doc, catalogue=catalogue)
+    paths = _paths(findings, "chain.context_trigger_roles")
+    assert paths == ["$.inputs[2].timeframe_role"]
+
+
+def test_exactly_one_context_and_one_trigger_is_accepted(chain_doc, catalogue):
+    """The passing case: the primitive as the doctrine defines it."""
+    roles = [item["timeframe_role"] for item in chain_doc["inputs"]]
+    assert roles == ["CONTEXT", "TRIGGER"]
+    assert check_chain(chain_doc, catalogue=catalogue) == []
+
+
+def test_a_third_role_is_only_rejected_under_context_trigger(chain_doc, catalogue):
+    """ALL defines how any number of inputs combine, so a third role is fine.
+
+    The restriction belongs to CONTEXT_TRIGGER specifically, not to roles in
+    general; a check that fired under ALL would be wrong.
+    """
+    chain_doc["primitive"] = "ALL"
+    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    chain_doc["timeframe_roles"]["LOCATION"] = "1H"
+    assert "chain.context_trigger_roles" not in _checks(
+        check_chain(chain_doc, catalogue=catalogue)
+    )
+
+
+def test_missing_role_is_left_to_the_schema(chain_doc, catalogue):
+    """This check reports surplus, not absence — the schema owns absence.
+
+    Reporting a missing TRIGGER here would duplicate, and could contradict,
+    what ``contains`` already says about it. "Exactly one" is enforced
+    jointly: at least one by the schema, at most one by this check.
+    """
+    chain_doc["inputs"] = [chain_doc["inputs"][0]]
+    assert "chain.context_trigger_roles" not in _checks(
+        check_chain(chain_doc, catalogue=catalogue)
+    )
+    with pytest.raises(DocumentInvalidError):
+        validate_document(chain_doc)
+
+
 # --- chain.timeframe_role_mapping --------------------------------------------
 
 
@@ -525,6 +626,7 @@ def test_every_declared_check_can_actually_fire(chain_doc, package_doc, catalogu
         lambda doc: doc["inputs"][1].__setitem__("strategy_id", "no_such_strategy"),
         lambda doc: doc["inputs"][0].__setitem__("timeframe", "1M"),
         lambda doc: doc["timeframe_roles"].__setitem__("CONTEXT", "1D"),
+        lambda doc: doc["inputs"].append(_third_input("LOCATION", "1H")),
     ):
         emitted.update(finding.check for finding in chain_variant(mutate))
 
@@ -685,3 +787,90 @@ def test_chain_command_refuses_a_document_of_another_kind(valid_path):
     with pytest.raises(ContractError) as excinfo:
         chain_command.run(_parse([str(valid_path("atomic_strategy"))]))
     assert "expects a chain document" in str(excinfo.value)
+
+
+# --- hsa chain on a strategy package ------------------------------------------
+#
+# Real chains live embedded inside a package — the contract embeds them rather
+# than referencing them — so a command that took only a standalone `chain`
+# document could not inspect any chain that actually exists without the caller
+# first cutting it out to a temporary file by hand. Both acceptance Engineers
+# did exactly that.
+
+
+def test_chain_command_accepts_a_strategy_package(capsys, valid_path):
+    assert chain_command.run(_parse([str(valid_path("strategy_package"))])) == 0
+    captured = capsys.readouterr()
+    assert "valid strategy_package; its embedded chain is valid" in captured.out
+    # The embedded chain is explained exactly as a standalone one would be.
+    assert "CONTEXT_TRIGGER(htf_context@4H, ltf_trigger@5M)" in captured.out
+    assert "golden_cross 1.0.0 — Moving average cross" in captured.out
+
+
+def test_chain_command_says_which_kind_of_document_it_read(capsys, valid_path):
+    """It must not be ambiguous which of the two paths ran."""
+    chain_command.run(_parse([str(valid_path("chain"))]))
+    assert "valid chain, structurally and semantically" in capsys.readouterr().out
+
+    chain_command.run(_parse([str(valid_path("strategy_package"))]))
+    assert "is a strategy_package" in capsys.readouterr().err
+
+
+def test_chain_command_states_the_package_checks_it_did_not_run(capsys, valid_path):
+    """A clean run here must not read as "the whole package is checked"."""
+    chain_command.run(_parse([str(valid_path("strategy_package"))]))
+    err = capsys.readouterr().err
+    for check in chain_command.PACKAGE_LEVEL_CHECKS:
+        assert check in err
+    assert "NOT run here" in err
+    assert "hsa validate" in err
+
+
+def test_chain_command_on_a_package_reports_paths_into_the_real_file(
+    tmp_path, package_doc
+):
+    """Findings must point where the chain lives on disk, at $.chain.*."""
+    package_doc["chain"]["inputs"][0]["timeframe"] = "1M"
+    package_doc["chain"]["timeframe_roles"]["CONTEXT"] = "1M"
+    package_doc["timeframe_roles"]["CONTEXT"] = "1M"
+    path = _write(tmp_path, "inverted_package.json", package_doc)
+
+    with pytest.raises(DocumentInvalidError) as excinfo:
+        chain_command.run(_parse([path]))
+    assert excinfo.value.json_path == "$.chain.inputs[0].timeframe"
+    assert excinfo.value.kind == "strategy_package"
+
+
+def test_chain_command_on_a_package_still_rejects_structural_failure(
+    tmp_path, package_doc
+):
+    package_doc["chain"]["primitive"] = "NOT_A_PRIMITIVE"
+    path = _write(tmp_path, "broken_package.json", package_doc)
+    with pytest.raises(DocumentInvalidError):
+        chain_command.run(_parse([path]))
+
+
+def test_chain_command_package_note_survives_quiet(capsys, valid_path):
+    """--quiet drops the explanation, never the record of a check not run."""
+    assert (
+        chain_command.run(_parse([str(valid_path("strategy_package")), "--quiet"])) == 0
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "were NOT run here" in captured.err
+
+
+def test_chain_command_still_refuses_kinds_that_carry_no_chain(valid_path):
+    for name in ("atomic_strategy", "cer_reference", "not_sufficiently_defined"):
+        with pytest.raises(ContractError) as excinfo:
+            chain_command.run(_parse([str(valid_path(name))]))
+        assert "expects a chain document" in str(excinfo.value)
+
+
+def test_chain_command_missing_catalogue_fails_loudly(monkeypatch, tmp_path, valid_path):
+    """A catalogue that cannot be loaded is an error, never a silent pass."""
+    monkeypatch.setenv("HSA_CATALOGUE_DIR", str(tmp_path / "absent"))
+    with pytest.raises(SchemaLoadError) as excinfo:
+        chain_command.run(_parse([str(valid_path("chain"))]))
+    assert "not silently skipped" in str(excinfo.value)
+    assert "chain.reference_resolves" in str(excinfo.value)

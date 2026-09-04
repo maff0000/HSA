@@ -46,8 +46,11 @@ from hsa.contracts import detect_kind
 from hsa.errors import DocumentInvalidError, SchemaLoadError
 
 __all__ = [
+    "CATALOGUE_DEPENDENT_CHECKS",
     "CATALOGUE_DIR_ENV",
     "CHECKS",
+    "CONTEXT_TRIGGER_ROLES",
+    "SEMANTIC_KINDS",
     "Catalogue",
     "Finding",
     "catalogue_dir",
@@ -72,11 +75,28 @@ CHECKS: tuple[str, ...] = (
     "chain.optional_input",
     "chain.reference_resolves",
     "chain.context_trigger_timeframes",
+    "chain.context_trigger_roles",
     "chain.timeframe_role_mapping",
     "package.chain_agreement",
     "package.chain_inputs_embedded",
     "package.hermes_coverage",
 )
+
+#: The document kinds that have semantic rules beyond their schema. Every
+#: other kind yields no findings, which is a real answer and not a silent
+#: skip; a caller reporting to a human should say so in those words.
+SEMANTIC_KINDS: tuple[str, ...] = ("chain", "strategy_package")
+
+#: The checks that cannot run without a catalogue. Named here so a caller
+#: that runs without one can report exactly which check DID NOT RUN, rather
+#: than letting an unrun check read as a check that passed.
+CATALOGUE_DEPENDENT_CHECKS: tuple[str, ...] = ("chain.reference_resolves",)
+
+#: The two roles ``CONTEXT_TRIGGER`` is defined as, and the only two it may
+#: carry. docs/COMPOSITION-DOCTRINE.md section 3 defines the primitive as a
+#: higher-timeframe CONTEXT holding while a lower-timeframe TRIGGER fires and
+#: says nothing at all about how a third role would combine.
+CONTEXT_TRIGGER_ROLES: tuple[str, ...] = ("CONTEXT", "TRIGGER")
 
 #: Sections a strategy package states authoritatively and its embedded chain
 #: restates operationally. PID lines 135-137 govern these at package level; the
@@ -558,6 +578,80 @@ def _check_context_trigger_timeframes(chain: Mapping, prefix: str) -> list[Findi
     return findings
 
 
+def _check_context_trigger_roles(chain: Mapping, prefix: str) -> list[Finding]:
+    """CONTEXT_TRIGGER carries exactly one CONTEXT and one TRIGGER, and nothing else.
+
+    The schema's conditional only requires that the inputs *contain* a CONTEXT
+    and *contain* a TRIGGER. ``contains`` is satisfied by one or by five, and
+    it says nothing whatever about the other roles present, so a chain can
+    validate while carrying a second TRIGGER, or a LOCATION input, under a
+    primitive that has no defined meaning for either.
+
+    That is not a stylistic objection. docs/COMPOSITION-DOCTRINE.md section 3
+    defines CONTEXT_TRIGGER as one thing — a higher-timeframe context holding
+    while a lower-timeframe trigger fires — and defines no combination rule for
+    a third participant. A document carrying one is asking FORGE to invent the
+    semantics, which is exactly what PID line 148 forbids.
+
+    SCOPE. This reports only what the schema cannot see: a *surplus* role, and
+    a *duplicate* of one of the two defined roles. It deliberately does not
+    report a role that is entirely absent, because the schema's ``contains``
+    already rejects that and this module does not duplicate structural
+    complaints. "Exactly one" is therefore enforced jointly: at least one by
+    ``chain.schema.json``, at most one here.
+    """
+    findings: list[Finding] = []
+    if chain.get("primitive") != "CONTEXT_TRIGGER":
+        return findings
+
+    inputs = _objects(chain.get("inputs"))
+    by_role: dict[str, list[int]] = {}
+    for index, item in enumerate(inputs):
+        role = item.get("timeframe_role")
+        if isinstance(role, str):
+            by_role.setdefault(role, []).append(index)
+
+    for role in CONTEXT_TRIGGER_ROLES:
+        held = by_role.get(role, [])
+        for ordinal, index in enumerate(held[1:], start=2):
+            findings.append(
+                Finding(
+                    "chain.context_trigger_roles",
+                    _join(prefix, "inputs", index, "timeframe_role"),
+                    "input %r is the %d%s %s input of a CONTEXT_TRIGGER chain; "
+                    "the primitive is defined as exactly one CONTEXT holding "
+                    "while exactly one TRIGGER fires, and no rule says how a "
+                    "second %s would combine with the first (inputs[%d] is "
+                    "already the %s)"
+                    % (
+                        inputs[index].get("input_id"),
+                        ordinal,
+                        "nd" if ordinal == 2 else ("rd" if ordinal == 3 else "th"),
+                        role,
+                        role,
+                        held[0],
+                        role,
+                    ),
+                )
+            )
+
+    for role in sorted(set(by_role) - set(CONTEXT_TRIGGER_ROLES)):
+        for index in by_role[role]:
+            findings.append(
+                Finding(
+                    "chain.context_trigger_roles",
+                    _join(prefix, "inputs", index, "timeframe_role"),
+                    "input %r declares role %s, but a CONTEXT_TRIGGER chain "
+                    "may carry only CONTEXT and TRIGGER inputs; the primitive "
+                    "is defined as those two roles and nothing states how a %s "
+                    "input combines with them. Use ALL or SEQUENCE, whose "
+                    "combination rules are defined, or drop the input"
+                    % (inputs[index].get("input_id"), role, role),
+                )
+            )
+    return findings
+
+
 def _check_references_resolve(
     chain: Mapping, catalogue: "Catalogue | None", prefix: str
 ) -> list[Finding]:
@@ -616,6 +710,7 @@ def check_chain(
     findings.extend(_check_optional_inputs(chain, prefix))
     findings.extend(_check_timeframe_roles(chain, prefix))
     findings.extend(_check_context_trigger_timeframes(chain, prefix))
+    findings.extend(_check_context_trigger_roles(chain, prefix))
     findings.extend(_check_references_resolve(chain, catalogue, prefix))
     return findings
 

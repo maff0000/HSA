@@ -111,6 +111,31 @@ def test_valid_document_exits_zero(valid_path, capsys):
     assert "valid strategy_package" in capsys.readouterr().out
 
 
+def test_the_success_line_still_begins_with_path_colon_valid_kind(valid_path, capsys):
+    """A cross-file contract, pinned here because it is easy to break.
+
+    ``hsa validate`` gained semantic checking and its success line grew a
+    trailing clause. Tests outside this file — the acceptance suites among
+    them — assert on the substring "valid <kind>", so the prefix is a promise
+    to other modules and not merely cosmetic.
+    """
+    for name in ("atomic_strategy", "chain", "strategy_package"):
+        path = valid_path(name)
+        assert main(["validate", str(path)]) == EXIT_OK
+        assert capsys.readouterr().out.startswith("%s: valid %s" % (path, name))
+
+
+def test_semantic_checking_is_the_default_and_opting_out_is_the_flag(
+    valid_path, capsys
+):
+    """Pins the default itself. If this ever flips back, the gap R1 closed
+    reopens for every caller who does not know a flag exists."""
+    parser = build_parser()
+    args = parser.parse_args(["validate", str(valid_path("chain"))])
+    assert args.structural_only is False
+    assert args.no_catalogue is False
+
+
 def test_quiet_suppresses_the_success_line(valid_path, capsys):
     code = main(["validate", "--quiet", str(valid_path("chain"))])
     assert code == EXIT_OK
