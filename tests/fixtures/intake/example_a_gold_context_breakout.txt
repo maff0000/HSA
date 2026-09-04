@@ -1,0 +1,30 @@
+Second pass with the same trader. I read him back the two things HSA would
+not accept from the first call and he pinned both of them down.
+
+XAUUSD, London session, same two charts as before. The 4H decides which way
+he is allowed to trade. The 5m is where he gets in.
+
+What he meant by trend on the 4H is the 50-period moving average of the
+close crossing the 200-period moving average of the close. When the 50
+crosses up through the 200 he is long-only. When it crosses down through the
+200 he is short-only. Golden cross and death cross, nothing else.
+
+The cross is a context, not an entry. He does not buy the cross itself. What
+it does is open a window: from the 4H bar on which the cross completes he
+will take 5m entries in that direction for the next thirty 4H bars. If none
+arrive in that time he drops the idea and waits for the next cross.
+
+What he meant by a breakout on the 5m is the 5m candle closing beyond the
+highest high of the previous twelve 5m candles by a tenth of that range's
+height, where the range height is that highest high minus the lowest low of
+the same twelve. That is the long side. The short side is the mirror: a
+close below the lowest low of the previous twelve by the same tenth of the
+range height. The close is what has to be beyond the level. A candle that
+pierces the level and closes back inside the range is not a break to him and
+he will not take it.
+
+The 5m break has to agree with the 4H cross. If the 4H has him long-only and
+the 5m breaks downward, that is not his setup and he stands aside.
+
+One entry per cross. Once he has taken the 5m break the window shuts and he
+waits for the next 4H cross.

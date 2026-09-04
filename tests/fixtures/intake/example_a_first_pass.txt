@@ -1,0 +1,12 @@
+Trader walked me through how he trades gold. XAUUSD, London session.
+
+He runs two charts. The 4H is the one that tells him which way he is allowed
+to trade, and the 5m is where he actually gets in.
+
+On the 4H he waits for a strong trend before he will look at anything at
+all. If it is not there he does not trade.
+
+Once he has that, he drops to the 5m and takes a clean breakout in the same
+direction as the 4H.
+
+One entry per setup. He does not add.

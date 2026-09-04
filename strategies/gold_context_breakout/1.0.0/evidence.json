@@ -1,0 +1,88 @@
+{
+  "document_type": "hsa_strategy_evidence_index",
+  "document_note": "This is an inventory-local index, deliberately NOT an HSA contract kind: it carries no $hsa_kind, so no tool routes it to a schema it was never meant to satisfy. Each entry in references[] is a full cer_reference document and validates against contracts/cer_reference.schema.json on its own.",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "package": "strategies/gold_context_breakout/1.0.0/package.json",
+  "generated_at_utc": "2026-09-04T00:00:00Z",
+  "cer_status": "NOT_LIVE",
+  "cer_status_note": "CER is not live (PID line 181). Every reference below declares source: CONTRACT_FIXTURE and carries FIXTURE- prefixed CER identities, so none of it can be mistaken for live evidence. These documents prove that HSA targets CER's identities and evidence semantics correctly. They prove NOTHING about this strategy: no experiment has been run and no gate has been evaluated. When CER goes live these are replaced at the hsa.cer.open_evidence_reader seam and never migrated into a parallel evidence store.",
+  "reference_types_present": [
+    "PROMOTION_EVIDENCE",
+    "RESEARCH_FINDING",
+    "SOURCE_ANALYSIS",
+    "STRATEGY_HYPOTHESIS",
+    "VERSION_LINEAGE"
+  ],
+  "references": [
+    {
+      "$hsa_kind": "cer_reference",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "reference_type": "SOURCE_ANALYSIS",
+      "source": "CONTRACT_FIXTURE",
+      "recorded_at_utc": "2026-09-01T09:00:00Z",
+      "$hsa_contract_version": "1.0.0",
+      "experiment_id": "FIXTURE-EXP-GOLD-0001",
+      "artifact_id": "FIXTURE-ART-GOLD-0001-source-analysis",
+      "summary": "Analysis of the raw source description behind gold_context_breakout: which claims were measurable and which were discretionary language. The first pass carried strong_trend and good_breakout, both refused; the second pass named both constructions and resolved.",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "reference_type": "STRATEGY_HYPOTHESIS",
+      "source": "CONTRACT_FIXTURE",
+      "recorded_at_utc": "2026-09-01T09:30:00Z",
+      "$hsa_contract_version": "1.0.0",
+      "experiment_id": "FIXTURE-EXP-GOLD-0001",
+      "artifact_id": "FIXTURE-ART-GOLD-0001-hypothesis",
+      "summary": "The economic claim under test: that a 5M range breakout aligned with the prevailing 4H moving-average regime carries information that the same breakout against that regime does not.",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "reference_type": "VERSION_LINEAGE",
+      "source": "CONTRACT_FIXTURE",
+      "recorded_at_utc": "2026-09-01T10:00:00Z",
+      "$hsa_contract_version": "1.0.0",
+      "experiment_id": "FIXTURE-EXP-GOLD-0001",
+      "artifact_id": "FIXTURE-ART-GOLD-0001-lineage",
+      "summary": "Lineage anchor for gold_context_breakout 1.0.0, the original version of this strategy: it supersedes nothing, which is what lifecycle.supersedes: null records in the package.",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "reference_type": "RESEARCH_FINDING",
+      "source": "CONTRACT_FIXTURE",
+      "recorded_at_utc": "2026-09-02T11:00:00Z",
+      "$hsa_contract_version": "1.0.0",
+      "experiment_id": "FIXTURE-EXP-GOLD-0001",
+      "run_id": "FIXTURE-RUN-GOLD-0001-A",
+      "evidence_id": "FIXTURE-EVID-GOLD-0001-A",
+      "artifact_id": "FIXTURE-ART-GOLD-0001-A-run-summary",
+      "summary": "A run against this version, carrying the full CER identity chain experiment_id -> run_id -> evidence_id -> artifact_id. Stand-in only: no run has occurred.",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "reference_type": "PROMOTION_EVIDENCE",
+      "source": "CONTRACT_FIXTURE",
+      "recorded_at_utc": "2026-09-02T12:00:00Z",
+      "$hsa_contract_version": "1.0.0",
+      "experiment_id": "FIXTURE-EXP-GOLD-0001",
+      "run_id": "FIXTURE-RUN-GOLD-0001-A",
+      "evidence_id": "FIXTURE-EVID-GOLD-0001-PROMO",
+      "artifact_id": "FIXTURE-ART-GOLD-0001-PROMO-report",
+      "summary": "The shape a promotion decision for this version would take. It is a fixture: no gate has been evaluated, which is why the package's lifecycle.status is CANDIDATE and not PROMOTED.",
+      "supports": "PROMOTION"
+    }
+  ]
+}
