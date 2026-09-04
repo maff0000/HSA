@@ -1,0 +1,72 @@
+{
+  "$hsa_kind": "not_sufficiently_defined",
+  "$hsa_contract_version": "1.0.0",
+  "result": "STRATEGY_NOT_SUFFICIENTLY_DEFINED",
+  "intake_id": "intake_0001",
+  "generated_at_utc": "2026-09-04T00:00:00Z",
+  "provenance": {
+    "source_type": "VIDEO_DERIVED",
+    "source_reference": "HSA v1 contract fixture — discretionary phrases named at PID lines 113-118.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z"
+  },
+  "resolved_summary": [
+    "Instrument and session are unambiguous: XAUUSD, London session.",
+    "The directional bias rule is measurable and maps onto HERMES structure fields."
+  ],
+  "unresolved_items": [
+    {
+      "item_id": "large_wick",
+      "source_language": "a large rejection wick",
+      "location": "source video, 04:12",
+      "why_unresolved": "Large is not quantified. Wick size could be an absolute price distance, a fraction of the candle range, or a multiple of recent average wick length, and the three disagree on real bars.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description": "Choose the measure and the threshold: wick length as a fraction of candle range, with a minimum ratio.",
+        "responsible": "MATT"
+      },
+      "candidate_definitions": [
+        {
+          "label": "Fraction of candle range",
+          "measurable_definition": "Wick length divided by total candle range is at least a parameterised ratio.",
+          "required_hermes_fields": [
+            {"field": "candle.wick_upper", "purpose": "Upper wick length of the evaluated bar."},
+            {"field": "candle.range", "purpose": "High minus low of the evaluated bar."}
+          ]
+        },
+        {
+          "label": "Multiple of recent average wick",
+          "measurable_definition": "Wick length is at least N times the mean wick length over a parameterised lookback."
+        }
+      ]
+    },
+    {
+      "item_id": "near_resistance",
+      "source_language": "price gets near resistance",
+      "location": "source video, 05:40",
+      "why_unresolved": "Neither the resistance level construction nor the proximity tolerance is stated, so proximity cannot be evaluated mechanically.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "HERMES_MAPPING", "PARAMETER_DEFINITION"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "HUMAN_DECISION",
+        "description": "Decide how resistance is constructed and the tolerance band that counts as near.",
+        "responsible": "MATT"
+      }
+    },
+    {
+      "item_id": "session_filter",
+      "source_language": "works best in the morning",
+      "location": "source video, 09:02",
+      "why_unresolved": "No timezone is given, and HSA records UTC only. Morning is not resolvable without one.",
+      "blocks": ["TIMING_SEMANTICS"],
+      "severity": "ADVISORY",
+      "resolution_needed": {
+        "kind": "EVIDENCE",
+        "description": "Establish from run evidence whether a session filter changes the outcome before adopting one.",
+        "responsible": "CER",
+        "cer_evidence_type": "RESEARCH_FINDING"
+      }
+    }
+  ]
+}

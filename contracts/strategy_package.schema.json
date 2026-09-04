@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/strategy_package.schema.json",
+  "title": "HSA governed strategy package",
+  "description": "The governed HSA strategy package (PID lines 122-148). This is the deliverable FORGE consumes to implement inside HELIOS, so it must be deterministic and machine-consumable: PID line 148 requires enough precision that FORGE implements the specification rather than inventing trading logic.\n\nEvery field enumerated at PID lines 126-146 is REQUIRED here. PID line 124 says as applicable, and that is honoured by allowing structurally empty content where a section genuinely does not apply (for example an empty parameters array for a fully fixed strategy), never by allowing the field itself to be absent. A missing section is indistinguishable from an overlooked one, and FORGE cannot tell the difference; an explicitly empty one is a decision on the record.\n\nSELF-CONTAINMENT: atomic strategy definitions and the chain definition are EMBEDDED in full, not referenced by id. FORGE must be able to implement from this one document without resolving external files, and the embedded copies are what the evidence in CER was gathered against. Each embedded object validates against its own contract and carries its own $hsa_kind.\n\nCROSS-FIELD OBLIGATION not expressible in JSON Schema: the package-level direction_semantics, timing, persistence, expiry and state_semantics are the authoritative governed statement, and the embedded chain restates them operationally. The two MUST agree. JSON Schema cannot compare them, so this is a semantic check for the intake/validation work item, not a guarantee of this file. The package level wins if they ever diverge.\n\nHSA does not embed runtime trading state or broker/account knowledge (PID line 156): there is no property here through which account, position or broker state could be expressed.",
+  "type": "object",
+  "properties": {
+    "$hsa_kind": {"const": "strategy_package"},
+    "$hsa_contract_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "strategy_id": {"$ref": "common.defs.json#/$defs/strategy_id"},
+    "strategy_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "title": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "thesis": {
+      "$ref": "common.defs.json#/$defs/non_empty_string",
+      "description": "Economic / trading thesis (PID line 130)."
+    },
+    "instruments": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+    },
+    "intended_horizon": {
+      "enum": ["SCALP", "INTRADAY", "SWING", "POSITION"],
+      "description": "Intended horizon (PID line 131). Declaring it is what lets the portfolio avoid forcing a strategy outside its preferred market shape (PID line 194)."
+    },
+    "intended_style": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "required_hermes_fields": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/hermes_field"},
+      "description": "The union of every HERMES fact this package needs (PID line 132), stated once at package level so FORGE can provision inputs without walking the atomics."
+    },
+    "atomic_strategies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "atomic_strategy.schema.json"},
+      "description": "Full atomic strategy definitions, embedded (PID line 133). Each is independently testable on its own (PID line 47)."
+    },
+    "timeframe_roles": {
+      "type": "object",
+      "description": "Semantic timeframe roles (PID lines 84-97, 134).",
+      "propertyNames": {"$ref": "common.defs.json#/$defs/timeframe_role"},
+      "additionalProperties": {"$ref": "common.defs.json#/$defs/timeframe"},
+      "minProperties": 1
+    },
+    "chain": {
+      "$ref": "chain.schema.json",
+      "description": "The full chain definition, embedded (PID line 134)."
+    },
+    "direction_semantics": {"$ref": "common.defs.json#/$defs/direction_semantics"},
+    "timing": {
+      "type": "object",
+      "description": "Governed timing statement (PID line 136).",
+      "properties": {
+        "evaluation_trigger": {"enum": ["BAR_CLOSE", "TICK", "ON_INPUT_CHANGE"]},
+        "evaluation_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "sequence_window": {
+          "type": "object",
+          "properties": {
+            "max_bars": {"type": "integer", "minimum": 1},
+            "timeframe": {"$ref": "common.defs.json#/$defs/timeframe"}
+          },
+          "required": ["max_bars", "timeframe"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["evaluation_trigger", "evaluation_timeframe"],
+      "additionalProperties": false
+    },
+    "persistence": {
+      "type": "object",
+      "description": "Governed persistence statement (PID line 136).",
+      "properties": {
+        "signal_persists": {"type": "boolean"},
+        "persist_for_bars": {"type": "integer", "minimum": 0},
+        "persist_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "re_arm_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+      },
+      "required": ["signal_persists", "persist_for_bars", "persist_timeframe"],
+      "additionalProperties": false
+    },
+    "expiry": {
+      "type": "object",
+      "description": "Governed expiry statement (PID line 136).",
+      "properties": {
+        "expires": {"type": "boolean"},
+        "expires_after_bars": {"type": "integer", "minimum": 1},
+        "expiry_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "expiry_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+      },
+      "required": ["expires", "expiry_rule"],
+      "additionalProperties": false,
+      "if": {
+        "properties": {"expires": {"const": true}},
+        "required": ["expires"]
+      },
+      "then": {
+        "required": ["expires", "expiry_rule", "expires_after_bars", "expiry_timeframe"]
+      }
+    },
+    "state_semantics": {
+      "type": "object",
+      "description": "Governed state statement (PID line 137).",
+      "properties": {
+        "stateful": {"type": "boolean"},
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        },
+        "initial_state": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+        "state_transition_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+        "reset_conditions": {
+          "type": "array",
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        }
+      },
+      "required": ["stateful", "states", "initial_state", "reset_conditions"],
+      "additionalProperties": false
+    },
+    "invalidation_conditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+      "description": "What invalidates an in-progress or asserted setup (PID line 139). minItems 1 because a setup that can never be invalidated is not a testable claim."
+    },
+    "validity_conditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+      "description": "The market conditions under which this strategy is expected to be valid (PID line 139). Outside them, dormancy is the correct behaviour, not a failure (PID line 195)."
+    },
+    "parameters": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/parameter"},
+      "description": "Package-level parameter definitions and allowed ranges (PID line 140). May be empty when every parameter is owned by an embedded atomic strategy; the field itself is still required."
+    },
+    "output_contract": {
+      "$ref": "common.defs.json#/$defs/output_contract",
+      "description": "Expected output contract of the package as a whole (PID line 141)."
+    },
+    "deterministic_test_cases": {
+      "type": "array",
+      "minItems": 1,
+      "description": "End-to-end deterministic cases for the composed package (PID line 142), over and above each atomic strategy's own cases.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          },
+          "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+          "given_hermes_facts": {"type": "object"},
+          "given_parameters": {"type": "object"},
+          "expected_output": {"type": "object"}
+        },
+        "required": ["case_id", "description", "given_hermes_facts", "expected_output"],
+        "additionalProperties": false
+      }
+    },
+    "evidence_requirements": {
+      "type": "object",
+      "description": "Backtest and evidence requirements (PID line 143). These are stated BEFORE evidence is gathered, which is what stops thresholds being moved to fit a result.",
+      "properties": {
+        "backtest_requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        },
+        "forward_test_requirements": {
+          "type": "array",
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        },
+        "minimum_sample_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minimum number of qualifying occurrences before the acceptance criteria may be evaluated at all. Guards against declaring edge from a handful of trades (PID line 198)."
+        },
+        "required_cer_evidence_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "common.defs.json#/$defs/cer_reference_type"}
+        }
+      },
+      "required": ["backtest_requirements", "minimum_sample_size", "required_cer_evidence_types"],
+      "additionalProperties": false
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.defs.json#/$defs/criterion"},
+      "description": "Machine-evaluable acceptance criteria (PID line 144)."
+    },
+    "rejection_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.defs.json#/$defs/criterion"},
+      "description": "Machine-evaluable rejection criteria (PID line 144). Required, and required to be non-empty: a strategy with no stated way to fail cannot be governed by evidence."
+    },
+    "provenance": {
+      "$ref": "common.defs.json#/$defs/provenance",
+      "description": "Provenance to the original strategy source (PID line 145)."
+    },
+    "cer_references": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "cer_reference.schema.json"},
+      "description": "CER identity and evidence references (PID line 146). At least one is always present, since a package always has at least a source-analysis or hypothesis reference even before any run exists."
+    },
+    "lifecycle": {
+      "type": "object",
+      "description": "Version lifecycle (PID lines 183-189). Promoted versions are immutable; a modification is a separately versioned candidate that must pass the evidence gates again, which is acceptance criterion 13 (PID line 262).",
+      "properties": {
+        "status": {
+          "enum": ["CANDIDATE", "PROMOTED", "DORMANT", "RETIRED"],
+          "description": "DORMANT is a normal resting state, not a failure (PID lines 195, 197)."
+        },
+        "immutable_once_promoted": {"const": true},
+        "created_at_utc": {"$ref": "common.defs.json#/$defs/utc_timestamp"},
+        "supersedes": {
+          "type": ["object", "null"],
+          "description": "The promoted version this candidate proposes to replace, or null for an original. Populating this is how a redesign stays a NEW version rather than an in-place tweak.",
+          "properties": {
+            "strategy_id": {"$ref": "common.defs.json#/$defs/strategy_id"},
+            "strategy_version": {"$ref": "common.defs.json#/$defs/semver"},
+            "rationale": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+          },
+          "required": ["strategy_id", "strategy_version", "rationale"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["status", "immutable_once_promoted", "created_at_utc", "supersedes"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "$hsa_kind",
+    "strategy_id",
+    "strategy_version",
+    "title",
+    "description",
+    "thesis",
+    "instruments",
+    "intended_horizon",
+    "intended_style",
+    "required_hermes_fields",
+    "atomic_strategies",
+    "timeframe_roles",
+    "chain",
+    "direction_semantics",
+    "timing",
+    "persistence",
+    "expiry",
+    "state_semantics",
+    "invalidation_conditions",
+    "validity_conditions",
+    "parameters",
+    "output_contract",
+    "deterministic_test_cases",
+    "evidence_requirements",
+    "acceptance_criteria",
+    "rejection_criteria",
+    "provenance",
+    "cer_references",
+    "lifecycle"
+  ],
+  "additionalProperties": false
+}

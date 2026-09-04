@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hsa"
+description = "HELIOS Strategy Architect: governed strategy-engineering contracts and CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version"]
+dependencies = ["jsonschema>=4.10,<5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+hsa = "hsa.cli:main"
+
+[tool.setuptools]
+packages = ["hsa", "hsa.commands"]
+
+[tool.setuptools.dynamic]
+version = {attr = "hsa.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

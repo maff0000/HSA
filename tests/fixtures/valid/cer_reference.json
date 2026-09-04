@@ -1,0 +1,15 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "experiment_id": "EXP-2026-09-04-0001",
+  "run_id": "RUN-2026-09-04-0007",
+  "evidence_id": "EVID-2026-09-04-0007-A",
+  "artifact_id": "ART-2026-09-04-0007-A-summary",
+  "reference_type": "SOURCE_ANALYSIS",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "Fixture reference standing in for CER while CER is not live (PID line 181).",
+  "recorded_at_utc": "2026-09-04T00:00:00Z",
+  "supports": "INFORMATIONAL"
+}

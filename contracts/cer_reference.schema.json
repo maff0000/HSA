@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/cer_reference.schema.json",
+  "title": "HSA CER reference",
+  "description": "CER canonical identities and evidence semantics (PID lines 160-181). HSA does not own evidence; it points at CER's.\n\nSCOPE — shapes only: PID line 269 makes a CER datastore an explicit non-goal. This schema defines how an HSA document NAMES a piece of CER evidence, and nothing about how that evidence is stored, queried or produced. There is no storage model here on purpose.\n\nThe canonical identities are strategy_id, strategy_version, experiment_id, run_id, evidence_id and artifact_id (PID lines 166-171). strategy_id and strategy_version are always required, because every HSA evidence reference is anchored to a specific immutable strategy version. At least one of experiment_id, run_id, evidence_id or artifact_id must also be present, otherwise the document names a strategy but no evidence and is not a reference at all.\n\nPID line 181 permits contract fixtures while CER is not live but forbids an incompatible permanent evidence store. The required source field forces that distinction to be declared in the document rather than inferred, so fixture-backed references can be found and replaced when CER goes live.",
+  "type": "object",
+  "properties": {
+    "$hsa_kind": {"const": "cer_reference"},
+    "$hsa_contract_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "strategy_id": {"$ref": "common.defs.json#/$defs/strategy_id"},
+    "strategy_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "experiment_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$",
+      "description": "CER experiment identity. Opaque to HSA: HSA carries it, never mints or interprets it."
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$",
+      "description": "CER run identity. Opaque to HSA."
+    },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$",
+      "description": "CER evidence identity. Opaque to HSA."
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$",
+      "description": "CER artifact identity. Opaque to HSA."
+    },
+    "reference_type": {"$ref": "common.defs.json#/$defs/cer_reference_type"},
+    "source": {
+      "enum": ["CER_LIVE", "CONTRACT_FIXTURE"],
+      "description": "CER_LIVE means the identities resolve in CER itself. CONTRACT_FIXTURE means they are stand-ins used while CER is not yet live (PID line 181) and must be replaced, not migrated into a parallel evidence store."
+    },
+    "summary": {
+      "$ref": "common.defs.json#/$defs/non_empty_string",
+      "description": "What this evidence says, in one line. A convenience for human review only; CER remains the authority."
+    },
+    "recorded_at_utc": {"$ref": "common.defs.json#/$defs/utc_timestamp"},
+    "supports": {
+      "enum": ["PROMOTION", "REVISION", "REJECTION", "INFORMATIONAL"],
+      "description": "What decision this reference is offered in support of (PID line 179)."
+    }
+  },
+  "required": [
+    "$hsa_kind",
+    "strategy_id",
+    "strategy_version",
+    "reference_type",
+    "source",
+    "recorded_at_utc"
+  ],
+  "additionalProperties": false,
+  "anyOf": [
+    {"required": ["experiment_id"]},
+    {"required": ["run_id"]},
+    {"required": ["evidence_id"]},
+    {"required": ["artifact_id"]}
+  ]
+}

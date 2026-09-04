@@ -1,0 +1,639 @@
+{
+  "$hsa_kind": "strategy_package",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "title": "Gold 4H context with 5M breakout trigger",
+  "description": "A governed package composing a 4H golden-cross context with a 5M range-breakout trigger.",
+  "thesis": "Breakouts taken in the direction of an established higher-timeframe trend regime resolve more often than breakouts taken against it.",
+  "instruments": [
+    "XAUUSD"
+  ],
+  "intended_horizon": "INTRADAY",
+  "intended_style": "Trend-aligned intraday breakout, one setup per context episode.",
+  "required_hermes_fields": [
+    {
+      "field": "ma.fast",
+      "purpose": "Fast simple moving average of close.",
+      "timeframe": "4H"
+    },
+    {
+      "field": "ma.slow",
+      "purpose": "Slow simple moving average of close.",
+      "timeframe": "4H"
+    },
+    {
+      "field": "range.high",
+      "purpose": "High of the preceding consolidation range.",
+      "timeframe": "5M"
+    },
+    {
+      "field": "range.low",
+      "purpose": "Low of the preceding consolidation range.",
+      "timeframe": "5M"
+    },
+    {
+      "field": "candle.close",
+      "purpose": "Close of the evaluated bar.",
+      "timeframe": "5M"
+    }
+  ],
+  "atomic_strategies": [
+    {
+      "$hsa_kind": "atomic_strategy",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "golden_cross",
+      "strategy_version": "1.0.0",
+      "title": "Golden cross",
+      "description": "Fast moving average crosses above the slow moving average on the evaluated timeframe.",
+      "thesis": "A sustained shift of the short-horizon mean above the long-horizon mean marks a regime in which continuation is more likely than mean reversion.",
+      "instruments": [
+        "XAUUSD"
+      ],
+      "required_hermes_fields": [
+        {
+          "field": "ma.fast",
+          "purpose": "Fast simple moving average of close.",
+          "timeframe": "4H"
+        },
+        {
+          "field": "ma.slow",
+          "purpose": "Slow simple moving average of close.",
+          "timeframe": "4H"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "fast_period",
+          "description": "Lookback of the fast moving average, in bars of the evaluated timeframe.",
+          "type": "integer",
+          "default": 50,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 5,
+            "maximum": 200,
+            "step": 1
+          }
+        },
+        {
+          "name": "slow_period",
+          "description": "Lookback of the slow moving average, in bars of the evaluated timeframe.",
+          "type": "integer",
+          "default": 200,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 20,
+            "maximum": 400,
+            "step": 1
+          }
+        }
+      ],
+      "direction_semantics": {
+        "emits": [
+          "LONG",
+          "SHORT"
+        ],
+        "direction_rule": "LONG when fast crosses above slow; SHORT when fast crosses below slow.",
+        "inversion_allowed": false
+      },
+      "output_contract": {
+        "signal_type": "BOOLEAN",
+        "fields": [
+          {
+            "name": "matched",
+            "type": "boolean",
+            "description": "True on the bar the cross completes."
+          },
+          {
+            "name": "direction",
+            "type": "string",
+            "description": "LONG or SHORT."
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "description": "Why the bar did or did not match."
+          }
+        ],
+        "reason_field": "reason",
+        "emits_on_insufficient_history": "NULL"
+      },
+      "deterministic_test_cases": [
+        {
+          "case_id": "cross_up_matches",
+          "description": "Fast crosses from below to above slow on the evaluated bar.",
+          "given_hermes_facts": {
+            "ma.fast": [
+              1990.0,
+              2005.0
+            ],
+            "ma.slow": [
+              2000.0,
+              2000.5
+            ]
+          },
+          "given_parameters": {
+            "fast_period": 50,
+            "slow_period": 200
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "LONG"
+          }
+        },
+        {
+          "case_id": "no_cross_does_not_match",
+          "description": "Fast stays below slow across both bars.",
+          "given_hermes_facts": {
+            "ma.fast": [
+              1990.0,
+              1995.0
+            ],
+            "ma.slow": [
+              2000.0,
+              2000.5
+            ]
+          },
+          "given_parameters": {
+            "fast_period": 50,
+            "slow_period": 200
+          },
+          "expected_output": {
+            "matched": false
+          }
+        }
+      ],
+      "provenance": {
+        "source_type": "MATT_OBSERVATION",
+        "source_reference": "HSA v1 contract fixture — canonical atomic example named at PID line 55.",
+        "ingested_at_utc": "2026-09-04T00:00:00Z"
+      },
+      "doctrine_assertions": {
+        "self_contained": true,
+        "independently_testable": true,
+        "deterministic": true,
+        "execution_blind": true,
+        "unaware_of_other_strategies": true,
+        "hermes_driven": true
+      }
+    },
+    {
+      "$hsa_kind": "atomic_strategy",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "range_breakout",
+      "strategy_version": "1.0.0",
+      "title": "Range breakout",
+      "description": "Close breaks beyond the high or low of the preceding consolidation range by a bounded margin.",
+      "thesis": "A decisive close outside a compressed range signals that accumulated order flow has resolved in one direction.",
+      "instruments": [
+        "XAUUSD"
+      ],
+      "required_hermes_fields": [
+        {
+          "field": "range.high",
+          "purpose": "High of the preceding consolidation range.",
+          "timeframe": "5M"
+        },
+        {
+          "field": "range.low",
+          "purpose": "Low of the preceding consolidation range.",
+          "timeframe": "5M"
+        },
+        {
+          "field": "candle.close",
+          "purpose": "Close of the evaluated bar.",
+          "timeframe": "5M"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "range_lookback",
+          "description": "Number of bars used to define the consolidation range.",
+          "type": "integer",
+          "default": 12,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 3,
+            "maximum": 96,
+            "step": 1
+          }
+        },
+        {
+          "name": "break_margin_ratio",
+          "description": "Minimum break beyond the range boundary, as a fraction of the range height. Replaces the discretionary phrase good breakout with a measurable threshold.",
+          "type": "number",
+          "default": 0.1,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        }
+      ],
+      "direction_semantics": {
+        "emits": [
+          "LONG",
+          "SHORT"
+        ],
+        "direction_rule": "LONG on a break above range.high; SHORT on a break below range.low.",
+        "inversion_allowed": false
+      },
+      "output_contract": {
+        "signal_type": "BOOLEAN",
+        "fields": [
+          {
+            "name": "matched",
+            "type": "boolean",
+            "description": "True when the close breaks the range by at least the margin."
+          },
+          {
+            "name": "direction",
+            "type": "string",
+            "description": "LONG or SHORT."
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "description": "Why the bar did or did not match."
+          }
+        ],
+        "reason_field": "reason",
+        "emits_on_insufficient_history": "NULL"
+      },
+      "deterministic_test_cases": [
+        {
+          "case_id": "break_above_matches",
+          "description": "Close exceeds range.high by more than the margin.",
+          "given_hermes_facts": {
+            "range.high": 2010.0,
+            "range.low": 2000.0,
+            "candle.close": 2012.0
+          },
+          "given_parameters": {
+            "range_lookback": 12,
+            "break_margin_ratio": 0.1
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "LONG"
+          }
+        },
+        {
+          "case_id": "marginal_break_does_not_match",
+          "description": "Close exceeds range.high by less than the margin.",
+          "given_hermes_facts": {
+            "range.high": 2010.0,
+            "range.low": 2000.0,
+            "candle.close": 2010.5
+          },
+          "given_parameters": {
+            "range_lookback": 12,
+            "break_margin_ratio": 0.1
+          },
+          "expected_output": {
+            "matched": false
+          }
+        }
+      ],
+      "provenance": {
+        "source_type": "MATT_OBSERVATION",
+        "source_reference": "HSA v1 contract fixture — canonical atomic example named at PID line 55.",
+        "ingested_at_utc": "2026-09-04T00:00:00Z"
+      },
+      "doctrine_assertions": {
+        "self_contained": true,
+        "independently_testable": true,
+        "deterministic": true,
+        "execution_blind": true,
+        "unaware_of_other_strategies": true,
+        "hermes_driven": true
+      }
+    }
+  ],
+  "timeframe_roles": {
+    "CONTEXT": "4H",
+    "TRIGGER": "5M"
+  },
+  "chain": {
+    "$hsa_kind": "chain",
+    "$hsa_contract_version": "1.0.0",
+    "chain_id": "gold_context_breakout",
+    "chain_version": "1.0.0",
+    "title": "Higher-timeframe context with lower-timeframe breakout trigger",
+    "description": "A 4H golden cross must hold as context while a 5M range breakout fires as trigger.",
+    "instruments": [
+      "XAUUSD"
+    ],
+    "primitive": "CONTEXT_TRIGGER",
+    "inputs": [
+      {
+        "input_id": "htf_context",
+        "strategy_id": "golden_cross",
+        "strategy_version": "1.0.0",
+        "timeframe_role": "CONTEXT",
+        "timeframe": "4H",
+        "direction": "INHERIT"
+      },
+      {
+        "input_id": "ltf_trigger",
+        "strategy_id": "range_breakout",
+        "strategy_version": "1.0.0",
+        "timeframe_role": "TRIGGER",
+        "timeframe": "5M",
+        "direction": "INHERIT"
+      }
+    ],
+    "timeframe_roles": {
+      "CONTEXT": "4H",
+      "TRIGGER": "5M"
+    },
+    "state_semantics": {
+      "stateful": true,
+      "states": [
+        "IDLE",
+        "CONTEXT_ACTIVE",
+        "MATCHED"
+      ],
+      "initial_state": "IDLE",
+      "state_transition_rule": "IDLE to CONTEXT_ACTIVE when the context input matches; CONTEXT_ACTIVE to MATCHED when the trigger input matches in the same direction; MATCHED to IDLE on reset.",
+      "reset_conditions": [
+        "Context input ceases to match on its own timeframe.",
+        "Match expires without being consumed."
+      ]
+    },
+    "direction_semantics": {
+      "emits": [
+        "LONG",
+        "SHORT"
+      ],
+      "direction_rule": "Direction is taken from the context input; the trigger must agree or the chain does not match.",
+      "inversion_allowed": false
+    },
+    "timing": {
+      "evaluation_trigger": "BAR_CLOSE",
+      "evaluation_timeframe": "5M"
+    },
+    "persistence": {
+      "signal_persists": true,
+      "persist_for_bars": 3,
+      "persist_timeframe": "5M",
+      "re_arm_rule": "Re-arms once the state returns to CONTEXT_ACTIVE after a reset."
+    },
+    "expiry": {
+      "expires": true,
+      "expires_after_bars": 12,
+      "expiry_timeframe": "5M",
+      "expiry_rule": "An unconsumed match expires 12 bars of the 5M timeframe after it is produced."
+    },
+    "explanation_contract": {
+      "emit_reason_on_match": true,
+      "emit_reason_on_non_match": true,
+      "per_input_evaluation_reported": true,
+      "reason_fields": [
+        "reason",
+        "per_input_reasons",
+        "state_at_evaluation"
+      ]
+    },
+    "composition_assertions": {
+      "inputs_are_atomic_only": true,
+      "component_identity_preserved": true,
+      "no_chain_of_chain": true
+    },
+    "provenance": {
+      "source_type": "MATT_OBSERVATION",
+      "source_reference": "HSA v1 contract fixture — shape of PID acceptance example A (PID lines 234-236).",
+      "ingested_at_utc": "2026-09-04T00:00:00Z"
+    }
+  },
+  "direction_semantics": {
+    "emits": [
+      "LONG",
+      "SHORT"
+    ],
+    "direction_rule": "Direction is taken from the context input; the trigger must agree or the chain does not match.",
+    "inversion_allowed": false
+  },
+  "timing": {
+    "evaluation_trigger": "BAR_CLOSE",
+    "evaluation_timeframe": "5M"
+  },
+  "persistence": {
+    "signal_persists": true,
+    "persist_for_bars": 3,
+    "persist_timeframe": "5M",
+    "re_arm_rule": "Re-arms once the state returns to CONTEXT_ACTIVE after a reset."
+  },
+  "expiry": {
+    "expires": true,
+    "expires_after_bars": 12,
+    "expiry_timeframe": "5M",
+    "expiry_rule": "An unconsumed match expires 12 bars of the 5M timeframe after it is produced."
+  },
+  "state_semantics": {
+    "stateful": true,
+    "states": [
+      "IDLE",
+      "CONTEXT_ACTIVE",
+      "MATCHED"
+    ],
+    "initial_state": "IDLE",
+    "state_transition_rule": "IDLE to CONTEXT_ACTIVE when the context input matches; CONTEXT_ACTIVE to MATCHED when the trigger input matches in the same direction; MATCHED to IDLE on reset.",
+    "reset_conditions": [
+      "Context input ceases to match on its own timeframe.",
+      "Match expires without being consumed."
+    ]
+  },
+  "invalidation_conditions": [
+    "The 4H golden-cross context ceases to hold before the trigger fires.",
+    "The 5M trigger fires in the opposite direction to the context."
+  ],
+  "validity_conditions": [
+    "XAUUSD only.",
+    "Evaluated on 5M bar close during hours when 4H moving averages have sufficient history."
+  ],
+  "parameters": [
+    {
+      "name": "max_setups_per_context",
+      "description": "Maximum number of chain matches emitted per context episode, before the context must reset.",
+      "type": "integer",
+      "default": 1,
+      "units": "count",
+      "allowed_range": {
+        "minimum": 1,
+        "maximum": 5,
+        "step": 1
+      }
+    }
+  ],
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {
+        "name": "matched",
+        "type": "boolean",
+        "description": "True when context and trigger both hold in the same direction."
+      },
+      {
+        "name": "direction",
+        "type": "string",
+        "description": "LONG or SHORT, inherited from the context input."
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "description": "Explicit reason for the match or non-match."
+      },
+      {
+        "name": "per_input_reasons",
+        "type": "string",
+        "description": "Per-input attribution built from each atomic strategy's own reason field."
+      },
+      {
+        "name": "evaluated_at_utc",
+        "type": "timestamp",
+        "description": "Evaluation instant in UTC."
+      }
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "context_and_trigger_match",
+      "description": "Context holds LONG on 4H and the 5M breakout fires LONG within the persistence window.",
+      "given_hermes_facts": {
+        "ma.fast": [
+          1990.0,
+          2005.0
+        ],
+        "ma.slow": [
+          2000.0,
+          2000.5
+        ],
+        "range.high": 2010.0,
+        "range.low": 2000.0,
+        "candle.close": 2012.0
+      },
+      "given_parameters": {
+        "max_setups_per_context": 1
+      },
+      "expected_output": {
+        "matched": true,
+        "direction": "LONG"
+      }
+    },
+    {
+      "case_id": "trigger_without_context_does_not_match",
+      "description": "The 5M breakout fires but the 4H context is not active.",
+      "given_hermes_facts": {
+        "ma.fast": [
+          1990.0,
+          1995.0
+        ],
+        "ma.slow": [
+          2000.0,
+          2000.5
+        ],
+        "range.high": 2010.0,
+        "range.low": 2000.0,
+        "candle.close": 2012.0
+      },
+      "given_parameters": {
+        "max_setups_per_context": 1
+      },
+      "expected_output": {
+        "matched": false
+      }
+    }
+  ],
+  "evidence_requirements": {
+    "backtest_requirements": [
+      "At least 24 months of XAUUSD 5M and 4H history covering trending and ranging regimes.",
+      "Out-of-sample segment held back and evaluated once."
+    ],
+    "forward_test_requirements": [
+      "Forward evaluation over a period not used in any parameter selection."
+    ],
+    "minimum_sample_size": 100,
+    "required_cer_evidence_types": [
+      "PROMOTION_EVIDENCE",
+      "RESEARCH_FINDING"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "criterion_id": "min_sample",
+      "statement": "The backtest must produce at least the minimum number of qualifying setups.",
+      "metric": "qualifying_setup_count",
+      "comparator": ">=",
+      "threshold": 100
+    },
+    {
+      "criterion_id": "out_of_sample_holds",
+      "statement": "Out-of-sample expectancy must remain positive.",
+      "metric": "out_of_sample_expectancy",
+      "comparator": ">",
+      "threshold": 0
+    }
+  ],
+  "rejection_criteria": [
+    {
+      "criterion_id": "oos_collapse",
+      "statement": "Reject if out-of-sample expectancy is negative.",
+      "metric": "out_of_sample_expectancy",
+      "comparator": "<",
+      "threshold": 0
+    },
+    {
+      "criterion_id": "parameter_fragility",
+      "statement": "Reject if expectancy is only positive at a single parameter setting.",
+      "metric": "positive_expectancy_parameter_fraction",
+      "comparator": "<",
+      "threshold": 0.5
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "HSA v1 contract fixture — package shaped after PID acceptance example A (PID lines 234-236).",
+    "ingested_at_utc": "2026-09-04T00:00:00Z"
+  },
+  "cer_references": [
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "experiment_id": "EXP-2026-09-04-0001",
+      "run_id": "RUN-2026-09-04-0007",
+      "evidence_id": "EVID-2026-09-04-0007-A",
+      "artifact_id": "ART-2026-09-04-0007-A-summary",
+      "reference_type": "SOURCE_ANALYSIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Fixture reference standing in for CER while CER is not live (PID line 181).",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "gold_context_breakout",
+      "strategy_version": "1.0.0",
+      "experiment_id": "EXP-2026-09-04-0001",
+      "run_id": "RUN-2026-09-04-0007",
+      "evidence_id": "EVID-2026-09-04-0007-B",
+      "artifact_id": "ART-2026-09-04-0007-B-hypothesis",
+      "reference_type": "STRATEGY_HYPOTHESIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Fixture reference for the recorded strategy hypothesis (PID line 176).",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    }
+  ],
+  "lifecycle": {
+    "status": "CANDIDATE",
+    "immutable_once_promoted": true,
+    "created_at_utc": "2026-09-04T00:00:00Z",
+    "supersedes": null
+  }
+}

@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/chain.schema.json",
+  "title": "HSA strategy chain",
+  "description": "A chain / composition definition (PID lines 57-82). A chain is the separate composition model that combines normalised atomic outputs; the atomic strategies themselves stay unaware of each other.\n\nCANONICAL PRIMITIVES are exactly ALL, ANY, SEQUENCE, CONTEXT_TRIGGER (PID lines 65-68). The enum is closed: a new primitive is a PID change, not a document change.\n\nNO CHAIN-OF-CHAIN RECURSION — deliberate structural restriction: PID line 82 says prefer atomic-strategy inputs to chains in v1, and do not create recursive chain-of-chain complexity unless explicitly authorised. This schema makes that impossible rather than discouraged. A chain is FLAT by construction: it declares exactly one primitive at the top level and an inputs array whose items are atomic strategy references only. There is no reusable node definition, no self $ref, and no chain_id / chain_version / sub_chain property anywhere inside inputs. Combined with additionalProperties false on the input item, a nested object carrying its own primitive and inputs is rejected, and so is a reference to another chain document. Consequences accepted on purpose: an expression such as ALL of (context, ANY of (trigger_a, trigger_b)) cannot be expressed in v1 and must be split into separately governed chains. Both PID acceptance examples (lines 234-242) are flat and fit this model. Relaxing the restriction later is additive — permitting a nested node as an alternative inputs item would not invalidate any document written against this version — whereas allowing recursion now and withdrawing it later would break every document that used it.\n\nIDENTITY PRESERVATION: inputs reference atomic strategies by strategy_id plus strategy_version together (PID line 72). Version is required, never implied, so a chain always pins the exact immutable atomic version it was proven against (PID lines 185-189).",
+  "type": "object",
+  "properties": {
+    "$hsa_kind": {"const": "chain"},
+    "$hsa_contract_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "chain_id": {"$ref": "common.defs.json#/$defs/chain_id"},
+    "chain_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "title": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "instruments": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+    },
+    "primitive": {
+      "enum": ["ALL", "ANY", "SEQUENCE", "CONTEXT_TRIGGER"],
+      "description": "The single composition primitive this chain applies to its inputs. ALL: every input must match. ANY: at least one input must match. SEQUENCE: inputs must match in ascending sequence_index order within the declared window. CONTEXT_TRIGGER: a higher-timeframe CONTEXT input must hold while a lower-timeframe TRIGGER input fires."
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/atomic_input"},
+      "description": "Atomic strategy references only. See the chain-of-chain note in this schema's top-level description for why nothing else is permitted here."
+    },
+    "timeframe_roles": {
+      "type": "object",
+      "description": "Semantic role to concrete timeframe mapping (PID lines 84-97). Role names are canonical; the timeframes they map to are a per-strategy choice, so 4H/1H/15M/5M and 1D/4H/1H/15M are both legal. This is a hypothesis structure, not a guarantee of edge (PID line 97).",
+      "propertyNames": {"$ref": "common.defs.json#/$defs/timeframe_role"},
+      "additionalProperties": {"$ref": "common.defs.json#/$defs/timeframe"},
+      "minProperties": 1
+    },
+    "state_semantics": {
+      "type": "object",
+      "description": "State the chain carries between evaluations (PID lines 73, 137). A chain that latches a context or an armed trigger must say so explicitly.",
+      "properties": {
+        "stateful": {"type": "boolean"},
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        },
+        "initial_state": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+        "state_transition_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+        "reset_conditions": {
+          "type": "array",
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        }
+      },
+      "required": ["stateful", "states", "initial_state", "reset_conditions"],
+      "additionalProperties": false
+    },
+    "direction_semantics": {"$ref": "common.defs.json#/$defs/direction_semantics"},
+    "timing": {
+      "type": "object",
+      "description": "When the chain is evaluated and, for SEQUENCE, the window inside which the ordered steps must complete (PID lines 75, 136).",
+      "properties": {
+        "evaluation_trigger": {"enum": ["BAR_CLOSE", "TICK", "ON_INPUT_CHANGE"]},
+        "evaluation_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "sequence_window": {
+          "type": "object",
+          "properties": {
+            "max_bars": {"type": "integer", "minimum": 1},
+            "timeframe": {"$ref": "common.defs.json#/$defs/timeframe"}
+          },
+          "required": ["max_bars", "timeframe"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["evaluation_trigger", "evaluation_timeframe"],
+      "additionalProperties": false
+    },
+    "persistence": {
+      "type": "object",
+      "description": "How long a match remains asserted once produced (PID lines 76, 136).",
+      "properties": {
+        "signal_persists": {"type": "boolean"},
+        "persist_for_bars": {"type": "integer", "minimum": 0},
+        "persist_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "re_arm_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+      },
+      "required": ["signal_persists", "persist_for_bars", "persist_timeframe"],
+      "additionalProperties": false
+    },
+    "expiry": {
+      "type": "object",
+      "description": "When an un-consumed match or a latched state goes stale (PID lines 77, 136). If expires is true, the bar count and its timeframe are mandatory: an expiry without a measurable horizon is exactly the kind of discretionary language HSA must refuse (PID lines 110-120).",
+      "properties": {
+        "expires": {"type": "boolean"},
+        "expires_after_bars": {"type": "integer", "minimum": 1},
+        "expiry_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "expiry_rule": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+      },
+      "required": ["expires", "expiry_rule"],
+      "additionalProperties": false,
+      "if": {
+        "properties": {"expires": {"const": true}},
+        "required": ["expires"]
+      },
+      "then": {
+        "required": ["expires", "expiry_rule", "expires_after_bars", "expiry_timeframe"]
+      }
+    },
+    "explanation_contract": {
+      "type": "object",
+      "description": "PID line 80 requires an explicit reason for match AND for non-match. Those three flags are const true, so no chain can be authored that reports a bare boolean. A non-match with no reason is unauditable and therefore not governable.",
+      "properties": {
+        "emit_reason_on_match": {"const": true},
+        "emit_reason_on_non_match": {"const": true},
+        "per_input_evaluation_reported": {
+          "const": true,
+          "description": "The reason must attribute the outcome to individual inputs, using each atomic strategy's own reason_field."
+        },
+        "reason_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "common.defs.json#/$defs/non_empty_string"}
+        }
+      },
+      "required": [
+        "emit_reason_on_match",
+        "emit_reason_on_non_match",
+        "per_input_evaluation_reported",
+        "reason_fields"
+      ],
+      "additionalProperties": false
+    },
+    "composition_assertions": {
+      "type": "object",
+      "description": "Machine-checkable restatement of PID lines 59, 72 and 82.",
+      "properties": {
+        "inputs_are_atomic_only": {"const": true},
+        "component_identity_preserved": {"const": true},
+        "no_chain_of_chain": {"const": true}
+      },
+      "required": ["inputs_are_atomic_only", "component_identity_preserved", "no_chain_of_chain"],
+      "additionalProperties": false
+    },
+    "provenance": {"$ref": "common.defs.json#/$defs/provenance"}
+  },
+  "required": [
+    "$hsa_kind",
+    "chain_id",
+    "chain_version",
+    "title",
+    "description",
+    "instruments",
+    "primitive",
+    "inputs",
+    "timeframe_roles",
+    "state_semantics",
+    "direction_semantics",
+    "timing",
+    "persistence",
+    "expiry",
+    "explanation_contract",
+    "composition_assertions",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {"primitive": {"const": "SEQUENCE"}},
+        "required": ["primitive"]
+      },
+      "then": {
+        "properties": {
+          "inputs": {
+            "minItems": 2,
+            "items": {"required": ["sequence_index"]}
+          },
+          "timing": {"required": ["evaluation_trigger", "evaluation_timeframe", "sequence_window"]}
+        },
+        "required": ["inputs", "timing"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"primitive": {"const": "CONTEXT_TRIGGER"}},
+        "required": ["primitive"]
+      },
+      "then": {
+        "properties": {
+          "inputs": {
+            "minItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {"timeframe_role": {"const": "CONTEXT"}},
+                  "required": ["timeframe_role"]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {"timeframe_role": {"const": "TRIGGER"}},
+                  "required": ["timeframe_role"]
+                }
+              }
+            ]
+          }
+        },
+        "required": ["inputs"]
+      }
+    }
+  ],
+  "$defs": {
+    "atomic_input": {
+      "type": "object",
+      "description": "A reference to one atomic strategy, by identity and version together. This is the ONLY thing a chain may compose. It carries no primitive and no nested inputs, which is what makes chain-of-chain recursion structurally unreachable rather than merely discouraged.",
+      "properties": {
+        "input_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$",
+          "description": "Local handle for this input, used by the explanation contract to attribute a match or non-match. Must be unique within the chain; uniqueness across inputs is a semantic check, not expressible in JSON Schema."
+        },
+        "strategy_id": {"$ref": "common.defs.json#/$defs/strategy_id"},
+        "strategy_version": {
+          "$ref": "common.defs.json#/$defs/semver",
+          "description": "Required, never inferred. Pinning the exact version is how component identity survives composition (PID line 72)."
+        },
+        "timeframe_role": {"$ref": "common.defs.json#/$defs/timeframe_role"},
+        "timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
+        "direction": {
+          "enum": ["LONG", "SHORT", "EITHER", "INHERIT"],
+          "description": "INHERIT takes the chain's resolved direction; EITHER matches regardless of the input's own direction."
+        },
+        "sequence_index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based position. Required when the chain primitive is SEQUENCE, meaningless otherwise."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "An optional step, as in the optional lower-timeframe trigger of PID line 242. An optional input can never be the sole cause of a match."
+        }
+      },
+      "required": [
+        "input_id",
+        "strategy_id",
+        "strategy_version",
+        "timeframe_role",
+        "timeframe",
+        "direction"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

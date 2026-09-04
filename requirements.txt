@@ -1,0 +1,8 @@
+# HSA v1 runtime dependencies.
+# Standard library plus jsonschema only — see PID line 227 (keep
+# implementation lightweight) and line 228 (no custom orchestration
+# platform).
+jsonschema>=4.10,<5
+
+# Development / test only:
+#   pytest>=7

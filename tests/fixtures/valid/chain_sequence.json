@@ -1,0 +1,75 @@
+{
+  "$hsa_kind": "chain",
+  "chain_id": "ordered_price_action",
+  "chain_version": "1.0.0",
+  "title": "Ordered price-action sequence",
+  "description": "Two atomic steps that must occur in order within a bounded window.",
+  "instruments": ["XAUUSD"],
+  "primitive": "SEQUENCE",
+  "inputs": [
+    {
+      "input_id": "step_one",
+      "strategy_id": "golden_cross",
+      "strategy_version": "1.0.0",
+      "timeframe_role": "CONFIRMATION",
+      "timeframe": "15M",
+      "direction": "INHERIT",
+      "sequence_index": 1
+    },
+    {
+      "input_id": "step_two",
+      "strategy_id": "range_breakout",
+      "strategy_version": "1.0.0",
+      "timeframe_role": "TRIGGER",
+      "timeframe": "5M",
+      "direction": "INHERIT",
+      "sequence_index": 2,
+      "optional": true
+    }
+  ],
+  "timeframe_roles": {"CONFIRMATION": "15M", "TRIGGER": "5M"},
+  "state_semantics": {
+    "stateful": true,
+    "states": ["IDLE", "STEP_ONE_SEEN", "MATCHED"],
+    "initial_state": "IDLE",
+    "state_transition_rule": "Advance one state per satisfied step in ascending sequence_index order.",
+    "reset_conditions": ["Sequence window elapses before the final step."]
+  },
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "Direction is fixed by the first step and every later step must agree.",
+    "inversion_allowed": false
+  },
+  "timing": {
+    "evaluation_trigger": "BAR_CLOSE",
+    "evaluation_timeframe": "5M",
+    "sequence_window": {"max_bars": 24, "timeframe": "5M"}
+  },
+  "persistence": {
+    "signal_persists": false,
+    "persist_for_bars": 0,
+    "persist_timeframe": "5M"
+  },
+  "expiry": {
+    "expires": true,
+    "expires_after_bars": 24,
+    "expiry_timeframe": "5M",
+    "expiry_rule": "The partial sequence expires when the sequence window elapses."
+  },
+  "explanation_contract": {
+    "emit_reason_on_match": true,
+    "emit_reason_on_non_match": true,
+    "per_input_evaluation_reported": true,
+    "reason_fields": ["reason", "per_input_reasons"]
+  },
+  "composition_assertions": {
+    "inputs_are_atomic_only": true,
+    "component_identity_preserved": true,
+    "no_chain_of_chain": true
+  },
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "HSA v1 contract fixture — exercises the SEQUENCE conditional in chain.schema.json.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z"
+  }
+}

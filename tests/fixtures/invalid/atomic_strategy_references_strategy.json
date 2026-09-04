@@ -1,0 +1,144 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "golden_cross",
+  "strategy_version": "1.0.0",
+  "title": "Golden cross",
+  "description": "Fast moving average crosses above the slow moving average on the evaluated timeframe.",
+  "thesis": "A sustained shift of the short-horizon mean above the long-horizon mean marks a regime in which continuation is more likely than mean reversion.",
+  "instruments": [
+    "XAUUSD"
+  ],
+  "required_hermes_fields": [
+    {
+      "field": "ma.fast",
+      "purpose": "Fast simple moving average of close.",
+      "timeframe": "4H"
+    },
+    {
+      "field": "ma.slow",
+      "purpose": "Slow simple moving average of close.",
+      "timeframe": "4H"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "fast_period",
+      "description": "Lookback of the fast moving average, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 50,
+      "units": "bars",
+      "allowed_range": {
+        "minimum": 5,
+        "maximum": 200,
+        "step": 1
+      }
+    },
+    {
+      "name": "slow_period",
+      "description": "Lookback of the slow moving average, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 200,
+      "units": "bars",
+      "allowed_range": {
+        "minimum": 20,
+        "maximum": 400,
+        "step": 1
+      }
+    }
+  ],
+  "direction_semantics": {
+    "emits": [
+      "LONG",
+      "SHORT"
+    ],
+    "direction_rule": "LONG when fast crosses above slow; SHORT when fast crosses below slow.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {
+        "name": "matched",
+        "type": "boolean",
+        "description": "True on the bar the cross completes."
+      },
+      {
+        "name": "direction",
+        "type": "string",
+        "description": "LONG or SHORT."
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "description": "Why the bar did or did not match."
+      }
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "cross_up_matches",
+      "description": "Fast crosses from below to above slow on the evaluated bar.",
+      "given_hermes_facts": {
+        "ma.fast": [
+          1990.0,
+          2005.0
+        ],
+        "ma.slow": [
+          2000.0,
+          2000.5
+        ]
+      },
+      "given_parameters": {
+        "fast_period": 50,
+        "slow_period": 200
+      },
+      "expected_output": {
+        "matched": true,
+        "direction": "LONG"
+      }
+    },
+    {
+      "case_id": "no_cross_does_not_match",
+      "description": "Fast stays below slow across both bars.",
+      "given_hermes_facts": {
+        "ma.fast": [
+          1990.0,
+          1995.0
+        ],
+        "ma.slow": [
+          2000.0,
+          2000.5
+        ]
+      },
+      "given_parameters": {
+        "fast_period": 50,
+        "slow_period": 200
+      },
+      "expected_output": {
+        "matched": false
+      }
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "HSA v1 contract fixture — canonical atomic example named at PID line 55.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z"
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  },
+  "depends_on": [
+    {
+      "strategy_id": "range_breakout",
+      "strategy_version": "1.0.0"
+    }
+  ]
+}

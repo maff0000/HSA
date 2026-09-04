@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/common.defs.json",
+  "title": "HSA shared definitions",
+  "description": "Shared building blocks referenced by the HSA v1 document contracts. This file is NOT a document kind: it has no $hsa_kind discriminator and no HSA document ever validates against it directly. It exists so identity, timestamp, timeframe, provenance, parameter and output-contract shapes have exactly one definition across the contract set.",
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$",
+      "description": "Stable canonical strategy identity. Shared verbatim with CER (PID lines 162-171). Never reused for a different strategy and never changed across versions."
+    },
+    "chain_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$",
+      "description": "Stable canonical chain identity."
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Strict MAJOR.MINOR.PATCH. Promoted versions are immutable (PID lines 185-189): a modification is a new version, never an edit in place."
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "RFC3339 instant that MUST be expressed in UTC with a literal trailing Z. Local time is display-only and never persisted (PID line 225)."
+    },
+    "timeframe": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(M|H|D|W)$",
+      "description": "Chart timeframe. Suffix M means MINUTES (per PID line 95, which writes 1H/15M/5M/1M), H hours, D days, W weeks. There is deliberately no month suffix, so M is never ambiguous. Examples: 5M, 15M, 1H, 4H, 1D."
+    },
+    "timeframe_role": {
+      "enum": ["CONTEXT", "LOCATION", "CONFIRMATION", "TRIGGER"],
+      "description": "Semantic timeframe role (PID lines 84-97). The ROLE set is canonical; the timeframe each role maps to is not, so 4H/1H/15M/5M and 1D/4H/1H/15M are both legal mappings."
+    },
+    "direction": {
+      "enum": ["LONG", "SHORT", "NEUTRAL"]
+    },
+    "direction_semantics": {
+      "type": "object",
+      "description": "How direction is derived and expressed. Required everywhere direction can be observed (PID lines 74, 135).",
+      "properties": {
+        "emits": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/direction"}
+        },
+        "direction_rule": {"$ref": "#/$defs/non_empty_string"},
+        "inversion_allowed": {"type": "boolean"}
+      },
+      "required": ["emits", "direction_rule"],
+      "additionalProperties": false
+    },
+    "source_type": {
+      "enum": [
+        "MATT_OBSERVATION",
+        "TRADER_EXPLANATION",
+        "REPORT_OR_BOOK",
+        "VIDEO_DERIVED",
+        "EXTERNAL_STRATEGY",
+        "EXISTING_SPECIFICATION"
+      ],
+      "description": "Supported intake sources, one per PID lines 102-108."
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Traceability back to the original strategy source (PID line 145). Provenance is mandatory: an HSA artefact whose origin cannot be named is not governed.",
+      "properties": {
+        "source_type": {"$ref": "#/$defs/source_type"},
+        "source_reference": {"$ref": "#/$defs/non_empty_string"},
+        "ingested_at_utc": {"$ref": "#/$defs/utc_timestamp"},
+        "excerpt": {"type": "string"},
+        "notes": {"type": "string"}
+      },
+      "required": ["source_type", "source_reference", "ingested_at_utc"],
+      "additionalProperties": false
+    },
+    "hermes_field": {
+      "type": "object",
+      "description": "One measurable market fact this artefact consumes from HERMES (PID lines 21-22, 53, 132). HSA maps requirements onto HERMES outputs; it never invents its own feed.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{1,127}$"
+        },
+        "purpose": {"$ref": "#/$defs/non_empty_string"},
+        "timeframe": {"$ref": "#/$defs/timeframe"}
+      },
+      "required": ["field", "purpose"],
+      "additionalProperties": false
+    },
+    "parameter": {
+      "type": "object",
+      "description": "A tunable parameter with an explicit default, allowed range and units (PID line 140). Exactly one of allowed_range or allowed_values must be present, so every parameter has a mechanically checkable domain.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "description": {"$ref": "#/$defs/non_empty_string"},
+        "type": {"enum": ["integer", "number", "boolean", "string", "enum"]},
+        "default": {},
+        "units": {
+          "$ref": "#/$defs/non_empty_string",
+          "description": "Physical or logical unit, for example bars, pips, ratio, percent, count. Use the literal none for dimensionless parameters."
+        },
+        "allowed_range": {
+          "type": "object",
+          "properties": {
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "step": {"type": "number", "exclusiveMinimum": 0}
+          },
+          "required": ["minimum", "maximum"],
+          "additionalProperties": false
+        },
+        "allowed_values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": ["name", "description", "type", "default", "units"],
+      "additionalProperties": false,
+      "oneOf": [
+        {"required": ["allowed_range"]},
+        {"required": ["allowed_values"]}
+      ]
+    },
+    "output_field": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {"enum": ["boolean", "integer", "number", "string", "timestamp"]},
+        "description": {"$ref": "#/$defs/non_empty_string"}
+      },
+      "required": ["name", "type", "description"],
+      "additionalProperties": false
+    },
+    "output_contract": {
+      "type": "object",
+      "description": "The normalised output shape FORGE implements (PID lines 61, 141, 148). Normalisation is what makes composition possible without strategies knowing about each other.",
+      "properties": {
+        "signal_type": {
+          "enum": ["BOOLEAN", "STATE", "SCORE"],
+          "description": "BOOLEAN: matched or not. STATE: a named state from a declared set. SCORE: a bounded numeric strength."
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/output_field"}
+        },
+        "reason_field": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "description": "Name of the output field carrying the human-readable reason for the result. Mandatory so a chain can build its own explicit match/non-match reason (PID line 80) out of its components."
+        },
+        "emits_on_insufficient_history": {
+          "enum": ["NULL", "NEUTRAL", "ERROR"]
+        }
+      },
+      "required": ["signal_type", "fields", "reason_field"],
+      "additionalProperties": false
+    },
+    "cer_reference_type": {
+      "enum": [
+        "SOURCE_ANALYSIS",
+        "STRATEGY_HYPOTHESIS",
+        "VERSION_LINEAGE",
+        "RESEARCH_FINDING",
+        "PROMOTION_EVIDENCE",
+        "REVISION_EVIDENCE",
+        "REJECTION_EVIDENCE"
+      ],
+      "description": "What HSA records or targets through CER contracts, one per PID lines 175-179."
+    },
+    "criterion": {
+      "type": "object",
+      "description": "A machine-evaluable acceptance or rejection criterion. Prose alone is not sufficient: FORGE and CER must be able to evaluate it without interpretation (PID line 148).",
+      "properties": {
+        "criterion_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "statement": {"$ref": "#/$defs/non_empty_string"},
+        "metric": {"$ref": "#/$defs/non_empty_string"},
+        "comparator": {"enum": [">=", "<=", ">", "<", "==", "!="]},
+        "threshold": {"type": ["number", "string", "boolean"]}
+      },
+      "required": ["criterion_id", "statement", "metric", "comparator", "threshold"],
+      "additionalProperties": false
+    }
+  }
+}

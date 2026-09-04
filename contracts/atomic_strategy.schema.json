@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/atomic_strategy.schema.json",
+  "title": "HSA atomic strategy",
+  "description": "An atomic strategy definition (PID lines 43-55). Atomic strategies are small, self-contained, independently testable, deterministic, execution-blind, unaware of other strategies, and mechanically driven by HERMES facts.\n\nSTRUCTURAL PROHIBITION — why no field references another strategy: PID line 59 states that atomic strategies never call or import other strategies, and PID line 52 that they are unaware of other strategies. That is enforced here by construction rather than by convention. This schema declares additionalProperties false at every object level, and deliberately provides NO property through which another strategy could be named: there is no depends_on, no requires_strategy, no inputs, no components, no parent_chain, no child strategy_id anywhere in the document. The only strategy_id in an atomic document is the document's OWN identity. Because unknown properties are rejected, a document that invents such a field fails validation instead of being silently accepted. Composition is expressed exclusively in chain.schema.json, which references atomic strategies from the outside by strategy_id plus strategy_version (PID lines 61, 72). An atomic strategy therefore cannot acquire a dependency on a peer even by accident, which is what keeps it independently testable and keeps its evidence in CER attributable to itself alone.",
+  "type": "object",
+  "properties": {
+    "$hsa_kind": {
+      "const": "atomic_strategy",
+      "description": "Contract discriminator. Every HSA document carries one so tooling can route it to the right schema without out-of-band knowledge."
+    },
+    "$hsa_contract_version": {
+      "$ref": "common.defs.json#/$defs/semver",
+      "description": "Optional. Version of the HSA contract set this document was authored against."
+    },
+    "strategy_id": {
+      "$ref": "common.defs.json#/$defs/strategy_id",
+      "description": "This atomic strategy's OWN canonical identity. It is never a reference to another strategy."
+    },
+    "strategy_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "title": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+    "thesis": {
+      "$ref": "common.defs.json#/$defs/non_empty_string",
+      "description": "The economic or market-mechanical reason this pattern is expected to carry information (PID line 130)."
+    },
+    "instruments": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+      "description": "Instruments this atomic strategy is defined for. A strategy is not forced to trade outside its preferred market shape (PID line 194)."
+    },
+    "required_hermes_fields": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/hermes_field"},
+      "description": "Every measurable fact this strategy consumes. minItems 1 enforces PID line 53: an atomic strategy is mechanically driven by HERMES facts, so one with no declared inputs is not mechanically driven at all."
+    },
+    "parameters": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "common.defs.json#/$defs/parameter"},
+      "description": "May be empty for a fully fixed strategy, but every parameter that does exist must be fully bounded (PID line 140). Discretionary language such as large wick must arrive here as a bounded numeric parameter, never as prose (PID lines 110-118)."
+    },
+    "direction_semantics": {"$ref": "common.defs.json#/$defs/direction_semantics"},
+    "output_contract": {"$ref": "common.defs.json#/$defs/output_contract"},
+    "deterministic_test_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "description": "A fixed set of HERMES facts and the exact output they must produce. Determinism (PID line 49) is only a claim until it is pinned by cases like these.",
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          },
+          "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+          "given_hermes_facts": {"type": "object"},
+          "given_parameters": {"type": "object"},
+          "expected_output": {"type": "object"}
+        },
+        "required": ["case_id", "description", "given_hermes_facts", "expected_output"],
+        "additionalProperties": false
+      }
+    },
+    "provenance": {"$ref": "common.defs.json#/$defs/provenance"},
+    "doctrine_assertions": {
+      "type": "object",
+      "description": "Machine-checkable restatement of PID lines 45-53. Each is const true, so a document cannot be authored that declares itself exempt from atomic doctrine. Determinism and execution-blindness are asserted here and evidenced by deterministic_test_cases.",
+      "properties": {
+        "self_contained": {"const": true},
+        "independently_testable": {"const": true},
+        "deterministic": {"const": true},
+        "execution_blind": {
+          "const": true,
+          "description": "Knows nothing of orders, fills, positions, accounts or brokers (PID lines 51, 156)."
+        },
+        "unaware_of_other_strategies": {
+          "const": true,
+          "description": "Asserted here and enforced structurally by the absence of any strategy-reference property."
+        },
+        "hermes_driven": {"const": true}
+      },
+      "required": [
+        "self_contained",
+        "independently_testable",
+        "deterministic",
+        "execution_blind",
+        "unaware_of_other_strategies",
+        "hermes_driven"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "$hsa_kind",
+    "strategy_id",
+    "strategy_version",
+    "title",
+    "description",
+    "thesis",
+    "instruments",
+    "required_hermes_fields",
+    "parameters",
+    "direction_semantics",
+    "output_contract",
+    "deterministic_test_cases",
+    "provenance",
+    "doctrine_assertions"
+  ],
+  "additionalProperties": false
+}

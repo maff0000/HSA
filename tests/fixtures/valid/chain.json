@@ -1,0 +1,76 @@
+{
+  "$hsa_kind": "chain",
+  "$hsa_contract_version": "1.0.0",
+  "chain_id": "gold_context_breakout",
+  "chain_version": "1.0.0",
+  "title": "Higher-timeframe context with lower-timeframe breakout trigger",
+  "description": "A 4H golden cross must hold as context while a 5M range breakout fires as trigger.",
+  "instruments": ["XAUUSD"],
+  "primitive": "CONTEXT_TRIGGER",
+  "inputs": [
+    {
+      "input_id": "htf_context",
+      "strategy_id": "golden_cross",
+      "strategy_version": "1.0.0",
+      "timeframe_role": "CONTEXT",
+      "timeframe": "4H",
+      "direction": "INHERIT"
+    },
+    {
+      "input_id": "ltf_trigger",
+      "strategy_id": "range_breakout",
+      "strategy_version": "1.0.0",
+      "timeframe_role": "TRIGGER",
+      "timeframe": "5M",
+      "direction": "INHERIT"
+    }
+  ],
+  "timeframe_roles": {"CONTEXT": "4H", "TRIGGER": "5M"},
+  "state_semantics": {
+    "stateful": true,
+    "states": ["IDLE", "CONTEXT_ACTIVE", "MATCHED"],
+    "initial_state": "IDLE",
+    "state_transition_rule": "IDLE to CONTEXT_ACTIVE when the context input matches; CONTEXT_ACTIVE to MATCHED when the trigger input matches in the same direction; MATCHED to IDLE on reset.",
+    "reset_conditions": [
+      "Context input ceases to match on its own timeframe.",
+      "Match expires without being consumed."
+    ]
+  },
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "Direction is taken from the context input; the trigger must agree or the chain does not match.",
+    "inversion_allowed": false
+  },
+  "timing": {
+    "evaluation_trigger": "BAR_CLOSE",
+    "evaluation_timeframe": "5M"
+  },
+  "persistence": {
+    "signal_persists": true,
+    "persist_for_bars": 3,
+    "persist_timeframe": "5M",
+    "re_arm_rule": "Re-arms once the state returns to CONTEXT_ACTIVE after a reset."
+  },
+  "expiry": {
+    "expires": true,
+    "expires_after_bars": 12,
+    "expiry_timeframe": "5M",
+    "expiry_rule": "An unconsumed match expires 12 bars of the 5M timeframe after it is produced."
+  },
+  "explanation_contract": {
+    "emit_reason_on_match": true,
+    "emit_reason_on_non_match": true,
+    "per_input_evaluation_reported": true,
+    "reason_fields": ["reason", "per_input_reasons", "state_at_evaluation"]
+  },
+  "composition_assertions": {
+    "inputs_are_atomic_only": true,
+    "component_identity_preserved": true,
+    "no_chain_of_chain": true
+  },
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "HSA v1 contract fixture — shape of PID acceptance example A (PID lines 234-236).",
+    "ingested_at_utc": "2026-09-04T00:00:00Z"
+  }
+}

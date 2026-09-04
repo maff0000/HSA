@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hsa.helios.local/contracts/not_sufficiently_defined.schema.json",
+  "title": "HSA STRATEGY_NOT_SUFFICIENTLY_DEFINED result",
+  "description": "The structured refusal HSA returns when material ambiguity remains (PID line 120). PID line 39 forbids HSA from guessing ambiguous trading rules, so this document is not an error report: it is a first-class, governed outcome of intake, exactly as valid as a strategy package.\n\nIt must identify EXACTLY what is unresolved and, per unresolved item, what evidence or decision is needed. That is enforced structurally: unresolved_items requires at least one entry, and every entry requires the offending source language, why it cannot be measured, and a resolution_needed block naming the kind of input required and who must supply it. An item that says only that something is unclear cannot validate.\n\nCandidate definitions may be offered, but the schema deliberately provides no way to mark one as chosen. Choosing is the resolution, and resolution happens outside this document. That is what stops a suggestion quietly becoming a guess (PID lines 110-118).",
+  "type": "object",
+  "properties": {
+    "$hsa_kind": {"const": "not_sufficiently_defined"},
+    "$hsa_contract_version": {"$ref": "common.defs.json#/$defs/semver"},
+    "result": {
+      "const": "STRATEGY_NOT_SUFFICIENTLY_DEFINED",
+      "description": "The literal result token from PID line 120. Held as a const so downstream consumers can branch on it without string guessing."
+    },
+    "intake_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$",
+      "description": "Identity of the intake attempt this refusal belongs to, so a later resubmission can be traced to it."
+    },
+    "generated_at_utc": {"$ref": "common.defs.json#/$defs/utc_timestamp"},
+    "provenance": {"$ref": "common.defs.json#/$defs/provenance"},
+    "resolved_summary": {
+      "type": "array",
+      "items": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+      "description": "Optional. What HSA DID successfully extract before it stopped. Preserves partial work so resubmission does not restart from nothing."
+    },
+    "unresolved_items": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every material ambiguity, itemised. minItems 1 because a refusal with nothing unresolved is a contradiction.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          },
+          "source_language": {
+            "$ref": "common.defs.json#/$defs/non_empty_string",
+            "description": "The discretionary phrase as it actually appeared in the source, quoted verbatim. PID lines 113-118 give the reference cases: large wick, near resistance, strong trend, confirmation candle, good breakout."
+          },
+          "location": {
+            "type": "string",
+            "description": "Where in the source it appeared, for example a timestamp, page or line."
+          },
+          "why_unresolved": {
+            "$ref": "common.defs.json#/$defs/non_empty_string",
+            "description": "Why this cannot be turned into a measurable definition without an outside input. Must be specific to the phrase, not a generic statement about ambiguity."
+          },
+          "blocks": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "ATOMIC_DECOMPOSITION",
+                "CHAIN_COMPOSITION",
+                "PARAMETER_DEFINITION",
+                "DIRECTION_SEMANTICS",
+                "TIMING_SEMANTICS",
+                "HERMES_MAPPING",
+                "TEST_DEFINITION"
+              ]
+            },
+            "description": "Which parts of strategy engineering this ambiguity is blocking. Makes the cost of leaving it unresolved explicit."
+          },
+          "severity": {
+            "enum": ["BLOCKING", "ADVISORY"],
+            "description": "BLOCKING items are why the result is STRATEGY_NOT_SUFFICIENTLY_DEFINED. ADVISORY items are recorded alongside them but would not on their own have stopped intake."
+          },
+          "resolution_needed": {
+            "type": "object",
+            "description": "What would actually unblock this item. Required per item, per PID line 120.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "MEASURABLE_DEFINITION",
+                  "PARAMETER_VALUE",
+                  "EVIDENCE",
+                  "HUMAN_DECISION",
+                  "DATA_SOURCE"
+                ]
+              },
+              "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+              "responsible": {
+                "enum": ["MATT", "SOURCE_AUTHOR", "CER", "HERMES", "NEO"],
+                "description": "Who or what must supply it. Naming the owner is what makes the refusal actionable rather than a complaint."
+              },
+              "cer_evidence_type": {"$ref": "common.defs.json#/$defs/cer_reference_type"}
+            },
+            "required": ["kind", "description", "responsible"],
+            "additionalProperties": false
+          },
+          "candidate_definitions": {
+            "type": "array",
+            "description": "Optional non-binding options HSA can measure, offered to speed up the human decision. There is deliberately no selected or chosen field: presenting an option is not adopting it.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+                "measurable_definition": {"$ref": "common.defs.json#/$defs/non_empty_string"},
+                "required_hermes_fields": {
+                  "type": "array",
+                  "items": {"$ref": "common.defs.json#/$defs/hermes_field"}
+                }
+              },
+              "required": ["label", "measurable_definition"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "item_id",
+          "source_language",
+          "why_unresolved",
+          "blocks",
+          "severity",
+          "resolution_needed"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "$hsa_kind",
+    "result",
+    "intake_id",
+    "generated_at_utc",
+    "provenance",
+    "unresolved_items"
+  ],
+  "additionalProperties": false
+}

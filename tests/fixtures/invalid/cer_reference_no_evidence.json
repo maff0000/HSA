@@ -1,0 +1,11 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "reference_type": "SOURCE_ANALYSIS",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "Fixture reference standing in for CER while CER is not live (PID line 181).",
+  "recorded_at_utc": "2026-09-04T00:00:00Z",
+  "supports": "INFORMATIONAL"
+}
