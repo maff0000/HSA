@@ -1,0 +1,15 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "wick_rejection_sequence",
+  "strategy_version": "0.1.0",
+  "experiment_id": "FIXTURE-EXP-WICK-0001",
+  "run_id": "FIXTURE-RUN-WICK-0001-A",
+  "evidence_id": "FIXTURE-EVID-WICK-0001-REJECT",
+  "artifact_id": "FIXTURE-ART-WICK-0001-REJECT-report",
+  "reference_type": "REJECTION_EVIDENCE",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "Evidence offered in support of rejecting wick_rejection_sequence 0.1.0: a stated rejection criterion was met. Rejection is a governed outcome on the record, not a deleted experiment.",
+  "recorded_at_utc": "2026-09-03T18:10:00Z",
+  "supports": "REJECTION"
+}

@@ -1,0 +1,15 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "experiment_id": "FIXTURE-EXP-GOLD-0001",
+  "run_id": "FIXTURE-RUN-GOLD-0001-A",
+  "evidence_id": "FIXTURE-EVID-GOLD-0001-A",
+  "artifact_id": "FIXTURE-ART-GOLD-0001-A-run-summary",
+  "reference_type": "RESEARCH_FINDING",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "A run over the declared sample produced the finding that the setup is dormant for long stretches in ranging conditions, which is expected behaviour rather than a defect (PID line 195).",
+  "recorded_at_utc": "2026-09-02T14:05:00Z",
+  "supports": "INFORMATIONAL"
+}

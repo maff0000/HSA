@@ -1,0 +1,13 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.1.0",
+  "experiment_id": "FIXTURE-EXP-GOLD-0002",
+  "artifact_id": "FIXTURE-ART-GOLD-0002-lineage",
+  "reference_type": "VERSION_LINEAGE",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "Lineage anchor for candidate gold_context_breakout 1.1.0, which supersedes 1.0.0. The superseded version is named in the package's lifecycle.supersedes, not in this reference: CER identities are opaque to HSA.",
+  "recorded_at_utc": "2026-09-03T10:00:00Z",
+  "supports": "INFORMATIONAL"
+}

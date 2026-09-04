@@ -1,0 +1,13 @@
+{
+  "$hsa_kind": "cer_reference",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "gold_context_breakout",
+  "strategy_version": "1.0.0",
+  "experiment_id": "FIXTURE-EXP-GOLD-0001",
+  "artifact_id": "FIXTURE-ART-GOLD-0001-source-analysis",
+  "reference_type": "SOURCE_ANALYSIS",
+  "source": "CONTRACT_FIXTURE",
+  "summary": "Analysis of the raw source description behind gold_context_breakout: which claims were measurable and which were discretionary language.",
+  "recorded_at_utc": "2026-09-01T09:00:00Z",
+  "supports": "INFORMATIONAL"
+}
