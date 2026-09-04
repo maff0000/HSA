@@ -14,7 +14,9 @@ Actions:
 
     hsa cer list      references visible to the evidence reader
     hsa cer show      one reference, by CER evidence_id
-    hsa cer validate  check reference documents against the frozen contract
+    hsa cer validate  check reference documents against the frozen contract,
+                      whether a single cer_reference or an inventory
+                      evidence.json container holding an array of them
     hsa cer lineage   version lineage and evidence for one strategy's packages
 
 Exit codes are owned by ``hsa.cli``, not here: this module raises the typed
@@ -27,6 +29,7 @@ import argparse
 from typing import Iterable, Mapping, Sequence
 
 from hsa.cer import (
+    EVIDENCE_CONTAINER_ARRAY,
     FIXTURES_DIR_ENV,
     CerError,
     SOURCE_CONTRACT_FIXTURE,
@@ -36,7 +39,7 @@ from hsa.cer import (
     is_fixture,
     open_evidence_reader,
     reference_types,
-    validate_reference,
+    validate_reference_file,
 )
 from hsa.contracts import read_json_file
 from hsa.versioning import lineage
@@ -113,16 +116,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "validate",
         help="validate cer_reference documents against the frozen contract",
         description=(
-            "Validate cer_reference documents. With no paths, every fixture "
-            "in the fixture directory is validated and checked for its "
-            "CONTRACT_FIXTURE label."
+            "Validate CER references. A named file may be a single "
+            "cer_reference document or an inventory evidence container "
+            "(strategies/<id>/<version>/evidence.json), which holds a "
+            "%r array of full cer_reference documents; every reference in "
+            "it is validated and reported by its JSON path. With no paths, "
+            "every fixture in the fixture directory is validated and checked "
+            "for its CONTRACT_FIXTURE label." % EVIDENCE_CONTAINER_ARRAY
         ),
     )
     validate.add_argument(
         "paths",
         metavar="<file>",
         nargs="*",
-        help="cer_reference JSON documents to validate",
+        help=(
+            "cer_reference documents, or evidence.json containers holding "
+            "them"
+        ),
     )
     validate.set_defaults(**{_HANDLER: _run_validate})
 
@@ -251,25 +261,42 @@ def _run_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _source_note_for(label: object) -> str:
+    if label in SOURCES:
+        return ""
+    return "  <- unexpected source, expected one of %s" % ", ".join(SOURCES)
+
+
 def _run_validate(args: argparse.Namespace) -> int:
     if args.paths:
         for path in args.paths:
-            document = read_json_file(path)
-            validate_reference(document, source=path)
-            label = document.get("source")
-            print(
-                "%s: valid cer_reference (%s)%s"
-                % (
-                    path,
-                    label,
-                    (
-                        ""
-                        if label in SOURCES
-                        else "  <- unexpected source, expected one of %s"
-                        % ", ".join(SOURCES)
-                    ),
+            # Either shipped shape: one cer_reference, or an inventory
+            # evidence container holding an array of them. A failure names
+            # the file AND the reference inside it.
+            found = validate_reference_file(path)
+            if len(found) == 1 and found[0][0] == "$":
+                document = found[0][1]
+                label = document.get("source")
+                print(
+                    "%s: valid cer_reference (%s)%s"
+                    % (path, label, _source_note_for(label))
                 )
+                continue
+            print(
+                "%s: valid evidence container, %d reference%s"
+                % (path, len(found), "" if len(found) == 1 else "s")
             )
+            for json_path, document in found:
+                label = document.get("source")
+                print(
+                    "  %s: valid cer_reference (%s, %s)%s"
+                    % (
+                        json_path,
+                        document["reference_type"],
+                        label,
+                        _source_note_for(label),
+                    )
+                )
         return 0
 
     reader = _reader(args)
@@ -280,17 +307,19 @@ def _run_validate(args: argparse.Namespace) -> int:
     # Loading is what validates: the reader refuses any fixture that fails
     # the contract or is not labelled CONTRACT_FIXTURE.
     loaded = items()
-    for path, reference in loaded:
+    for location, reference in loaded:
         print(
             "%s: valid cer_reference (%s, %s)"
             % (
-                path,
+                location,
                 reference["reference_type"],
                 "fixture" if is_fixture(reference) else reference["source"],
             )
         )
+    # Counted in references, not files: a fixture directory may hold
+    # evidence containers, and one container file carries many references.
     print(
-        "%d fixture%s valid and labelled %s"
+        "%d reference%s valid and labelled %s"
         % (
             len(loaded),
             "" if len(loaded) == 1 else "s",

@@ -7,7 +7,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0002-lineage",
   "reference_type": "VERSION_LINEAGE",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Lineage anchor for candidate gold_context_breakout 1.1.0, which supersedes 1.0.0. The superseded version is named in the package's lifecycle.supersedes, not in this reference: CER identities are opaque to HSA.",
+  "summary": "The shape a lineage anchor takes for a candidate that supersedes an earlier version: gold_context_breakout 1.1.0 superseding 1.0.0. The superseded version is named in the package's lifecycle.supersedes, not in this reference, because CER identities are opaque to HSA. Shape only — no 1.1.0 exists in strategies/, and none can be derived until 1.0.0 is genuinely promoted (PID line 189).",
   "recorded_at_utc": "2026-09-03T10:00:00Z",
   "supports": "INFORMATIONAL"
 }

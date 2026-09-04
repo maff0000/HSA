@@ -7,7 +7,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0001-hypothesis",
   "reference_type": "STRATEGY_HYPOTHESIS",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Hypothesis under test: a higher-timeframe trend context plus a lower-timeframe breakout trigger produces a positive-expectancy setup on XAUUSD.",
+  "summary": "The economic claim this strategy stakes: that a higher-timeframe trend context plus a lower-timeframe breakout trigger produces a positive-expectancy setup on XAUUSD. Stated, not shown — no run has been executed.",
   "recorded_at_utc": "2026-09-01T09:30:00Z",
   "supports": "INFORMATIONAL"
 }

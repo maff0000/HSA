@@ -35,8 +35,9 @@ changed across versions.
 
 ### `evidence.json` is a convention, not a contract
 
-It is an inventory-local index and deliberately carries **no `$hsa_kind`**, so
-no tool routes it to a schema it was never meant to satisfy. Its shape:
+It is an inventory-local **container**: an index of the CER references
+anchored to one version, deliberately carrying **no `$hsa_kind`** so that no
+tool routes it to a schema it was never meant to satisfy. Its shape:
 
 ```json
 {
@@ -50,6 +51,36 @@ no tool routes it to a schema it was never meant to satisfy. Its shape:
 
 Every entry in `references[]` **is** a full `cer_reference` document and
 validates against the frozen contract on its own.
+
+**What makes it a container is the absence of `$hsa_kind` plus the presence
+of a `references` array** — never the filename, and never any of the envelope
+fields around that array. `hsa.cer.split_evidence_document()` is the one
+place that decides, and `hsa cer validate` reads either shape:
+
+```bash
+python3 -m hsa.cli cer validate strategies/<id>/<version>/evidence.json
+```
+
+```
+strategies/gold_context_breakout/1.0.0/evidence.json: valid evidence container, 5 references
+  $.references[0]: valid cer_reference (SOURCE_ANALYSIS, CONTRACT_FIXTURE)
+  ...
+```
+
+A reference that fails is named by file **and** by its JSON path inside the
+container, so a container with one bad entry says which entry and which
+field:
+
+```
+strategies/<id>/<version>/evidence.json $.references[2] is not a valid cer_reference (1 problem)
+  at $.reference_type: 'PROMOTION_EVIDENC' is not one of [...]
+```
+
+> The envelope fields around `references[]` are **not yet standardised**:
+> `gold_context_breakout` uses `document_type` / `cer_status`, and
+> `wick_rejection_sequence` uses `$hsa_evidence` / `cer_live`. Both are read
+> correctly, because detection does not depend on them, but the two should
+> converge on one envelope. That convergence is not this document's to make.
 
 This file is an index, not a store. CER owns evidence; HSA points at it
 (`PID.md:160-181`). While CER is not live every reference declares
@@ -150,9 +181,47 @@ test run, so a package that drifts from its catalogue entries fails the suite.
 Evidence and lineage:
 
 ```bash
+python3 -m hsa.cli cer validate strategies/<id>/<version>/evidence.json
 python3 -m hsa.cli cer lineage strategies/<id>/<version>/package.json
 python3 -m hsa.cli cer list --strategy <id> --strategy-version <version>
 ```
+
+---
+
+## Why the inventory holds no second version yet
+
+Acceptance criterion 13 (`PID.md:262`) requires HSA to *produce a separately
+versioned candidate rather than mutate an existing promoted strategy*. The
+inventory holds one version of one strategy, and that is not an oversight:
+
+`hsa.versioning.derive_candidate` **refuses a parent that was never
+promoted**, because a version that has not been through the gates is not
+frozen, so it is edited directly rather than superseded
+(`docs/VERSIONING.md` §3). `gold_context_breakout` 1.0.0 is a `CANDIDATE`,
+and it cannot honestly become anything else: its own `acceptance_criteria`
+require at least 100 qualifying matches with a measured expectancy against an
+ungated control arm, and HSA has no backtester, no market data and no live
+CER with which to produce any of that. Marking it `PROMOTED` to unlock a
+derivation would manufacture the verdict, which is the one thing this
+repository must not do.
+
+So criterion 13 is proven, against this real package rather than a synthetic
+one, in `tests/test_criterion_13_inventory.py`:
+
+* deriving from the on-disk 1.0.0 is refused, with the governed message;
+* the positive path — a substantive revision of `context_window_bars`,
+  deriving 1.1.0 with a rationale, dropping the parent's verdict evidence,
+  validating structurally and semantically — runs over the real package's
+  content, with the promotion held **in memory** as a declared test scaffold
+  that is never written;
+* `strategies/gold_context_breakout/1.0.0/` is asserted byte-identical after
+  all of it;
+* `test_no_package_is_marked_promoted_without_live_cer_evidence` fails the
+  suite if anyone ever marks a package promoted without CER_LIVE promotion
+  evidence behind it.
+
+A real `strategies/gold_context_breakout/1.1.0/` is a product decision, not a
+test fix: it needs a genuine promotion of 1.0.0, which needs CER.
 
 ---
 

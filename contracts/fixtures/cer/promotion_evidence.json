@@ -9,7 +9,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0001-PROMO-report",
   "reference_type": "PROMOTION_EVIDENCE",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Evidence offered in support of promoting gold_context_breakout 1.0.0: the package's stated acceptance criteria were met over the declared minimum sample.",
+  "summary": "The shape a PROMOTION_EVIDENCE reference takes: evidence offered in support of promoting gold_context_breakout 1.0.0 against the acceptance criteria and minimum sample size its package declared before any run. Shape only — CER is not live, no gate has been evaluated, and the package's lifecycle.status is CANDIDATE.",
   "recorded_at_utc": "2026-09-02T16:20:00Z",
   "supports": "PROMOTION"
 }

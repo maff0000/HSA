@@ -9,7 +9,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0001-A-run-summary",
   "reference_type": "RESEARCH_FINDING",
   "source": "CONTRACT_FIXTURE",
-  "summary": "A run over the declared sample produced the finding that the setup is dormant for long stretches in ranging conditions, which is expected behaviour rather than a defect (PID line 195).",
+  "summary": "The shape a RESEARCH_FINDING reference takes, carrying the full CER identity chain experiment_id -> run_id -> evidence_id -> artifact_id: a run reporting that the setup is dormant for long stretches in ranging conditions, which would be expected behaviour rather than a defect (PID line 195). Shape only — no run has been executed.",
   "recorded_at_utc": "2026-09-02T14:05:00Z",
   "supports": "INFORMATIONAL"
 }

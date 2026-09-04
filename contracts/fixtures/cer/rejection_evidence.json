@@ -9,7 +9,7 @@
   "artifact_id": "FIXTURE-ART-WICK-0001-REJECT-report",
   "reference_type": "REJECTION_EVIDENCE",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Evidence offered in support of rejecting wick_rejection_sequence 0.1.0: a stated rejection criterion was met. Rejection is a governed outcome on the record, not a deleted experiment.",
+  "summary": "The shape a REJECTION_EVIDENCE reference takes: evidence offered in support of rejecting wick_rejection_sequence 0.1.0 against a rejection criterion its package stated in advance. Rejection is a governed outcome kept on the record, not a deleted experiment. Shape only — no criterion has been evaluated, and the package's lifecycle.status is CANDIDATE.",
   "recorded_at_utc": "2026-09-03T18:10:00Z",
   "supports": "REJECTION"
 }

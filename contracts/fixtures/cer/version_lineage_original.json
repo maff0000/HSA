@@ -7,7 +7,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0001-lineage",
   "reference_type": "VERSION_LINEAGE",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Lineage anchor for gold_context_breakout 1.0.0: the original promoted version, superseding nothing.",
+  "summary": "Lineage anchor for gold_context_breakout 1.0.0, the original version of this strategy: it supersedes nothing. A lineage anchor records where a version sits in its lineage and says nothing about its lifecycle status — 1.0.0 is a CANDIDATE, because no evidence gate has been evaluated.",
   "recorded_at_utc": "2026-09-02T16:25:00Z",
   "supports": "INFORMATIONAL"
 }

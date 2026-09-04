@@ -9,7 +9,7 @@
   "artifact_id": "FIXTURE-ART-GOLD-0002-REVISION-report",
   "reference_type": "REVISION_EVIDENCE",
   "source": "CONTRACT_FIXTURE",
-  "summary": "Evidence offered in support of the 1.1.0 candidate revision. It is anchored to 1.1.0, not to 1.0.0: a candidate must pass the governed evidence gates again and inherits no verdict from the version it supersedes (PID line 189).",
+  "summary": "The shape a REVISION_EVIDENCE reference takes for a candidate revision. It is anchored to 1.1.0, not to 1.0.0: a candidate must pass the governed evidence gates again and inherits no verdict from the version it supersedes (PID line 189). Shape only — no 1.1.0 exists in strategies/ and no gate has been evaluated.",
   "recorded_at_utc": "2026-09-03T15:40:00Z",
   "supports": "REVISION"
 }

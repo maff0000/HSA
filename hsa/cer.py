@@ -19,6 +19,26 @@ what a document CLAIMS about CER evidence, and it can tell you that the
 claim is well formed. It cannot tell you the evidence is true. Only CER can,
 and until CER is live nothing here has been checked against reality.
 
+TWO SHIPPED SHAPES
+------------------
+A CER reference reaches HSA in one of two forms, and this module reads both:
+
+  * a single ``cer_reference`` document, which declares ``$hsa_kind``;
+  * an inventory evidence container — ``strategies/<id>/<version>/
+    evidence.json`` — which declares no ``$hsa_kind`` and holds an array of
+    full ``cer_reference`` documents under ``references``.
+
+The container is a convention, not a contract kind, and that is deliberate:
+carrying no discriminator is what stops a tool routing it to a schema it was
+never meant to satisfy. It exists because evidence is anchored to a version,
+so a version's evidence belongs together, with the index metadata that
+describes the set rather than any one reference.
+
+``split_evidence_document()`` is the one place that tells the two apart, by
+the discriminator and never by filename, and it reports the JSON path of
+every reference it finds so a failure can name which entry of a container
+failed and which field in it.
+
 THE SEAM
 --------
 ``open_evidence_reader()`` is the single boundary where a live CER client
@@ -46,7 +66,12 @@ import os
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
-from hsa.contracts import contracts_dir, read_json_file, validate_document
+from hsa.contracts import (
+    DISCRIMINATOR,
+    contracts_dir,
+    read_json_file,
+    validate_document,
+)
 from hsa.errors import HSAError
 
 __all__ = [
@@ -58,14 +83,21 @@ __all__ = [
     "OPAQUE_IDENTITY_FIELDS",
     "SUPPORTS",
     "FIXTURES_DIR_ENV",
+    "EVIDENCE_CONTAINER_ARRAY",
     "CerError",
     "FixtureUnavailableError",
     "EvidenceNotFoundError",
+    "EvidenceDocumentShapeError",
     "reference_types",
     "fixtures_dir",
     "build_reference",
     "validate_reference",
+    "validate_reference_file",
     "is_fixture",
+    "is_evidence_container",
+    "split_evidence_document",
+    "read_reference_documents",
+    "locate_reference",
     "EvidenceReader",
     "FixtureEvidenceReader",
     "open_evidence_reader",
@@ -115,6 +147,18 @@ SUPPORTS: tuple[str, ...] = (
 #: repository-relative default (PID line 224).
 FIXTURES_DIR_ENV = "HSA_CER_FIXTURES_DIR"
 
+#: The array an inventory-local evidence container holds its references
+#: in. ``strategies/<id>/<version>/evidence.json`` is a CONVENTION, not a
+#: contract kind: it deliberately carries no ``$hsa_kind`` so that no tool
+#: routes it to a schema it was never meant to satisfy. What it does carry
+#: is this array, and every entry in it IS a full ``cer_reference``.
+#:
+#: Two shapes therefore ship, and they are told apart by the discriminator
+#: rather than by filename: a ``cer_reference`` declares ``$hsa_kind``, a
+#: container does not. Both governed packages in ``strategies/`` use the
+#: container form, which is why the reader understands it.
+EVIDENCE_CONTAINER_ARRAY = "references"
+
 _COMMON_DEFS = "common.defs.json"
 
 _reference_types_cache: tuple[str, ...] | None = None
@@ -135,6 +179,16 @@ class FixtureUnavailableError(CerError):
 
 class EvidenceNotFoundError(CerError):
     """No fixture reference matches the requested identity."""
+
+
+class EvidenceDocumentShapeError(CerError):
+    """A file is neither a ``cer_reference`` nor an evidence container.
+
+    Raised instead of guessing. A file HSA cannot recognise is reported
+    as unrecognised, naming both shapes it accepts, rather than being
+    pushed through the ``cer_reference`` schema and failing with errors
+    about a contract it was never meant to satisfy.
+    """
 
 
 def reference_types() -> tuple[str, ...]:
@@ -242,6 +296,101 @@ def is_fixture(document: Mapping) -> bool:
     return document.get("source") == SOURCE_CONTRACT_FIXTURE
 
 
+def is_evidence_container(document: Any) -> bool:
+    """True when ``document`` is an inventory-local evidence index.
+
+    The inventory stores a strategy version's evidence as one container at
+    ``strategies/<id>/<version>/evidence.json`` rather than one file per
+    reference: a container groups the evidence anchored to a version and
+    carries the index metadata (what is fixture, what is still owed) that
+    belongs to the version rather than to any single reference.
+
+    The container is not a contract kind and carries no ``$hsa_kind``. That
+    absence is the discriminator, so this check never depends on a filename.
+    """
+    return (
+        isinstance(document, Mapping)
+        and DISCRIMINATOR not in document
+        and isinstance(document.get(EVIDENCE_CONTAINER_ARRAY), list)
+    )
+
+
+def locate_reference(source: str, json_path: str) -> str:
+    """Render "which reference, in which file" as one location label.
+
+    A container holds many references; saying only which file failed would
+    leave the reader to find the offending entry by hand.
+    """
+    return source if json_path == "$" else "%s %s" % (source, json_path)
+
+
+def split_evidence_document(
+    document: Any,
+    source: str | None = None,
+) -> list[tuple[str, dict]]:
+    """Return ``(json_path, reference)`` pairs for one reference document.
+
+    Accepts either shipped shape — a single ``cer_reference``, or an
+    evidence container holding an array of them — and reports the JSON path
+    of every reference it found, so callers can name exactly which entry of
+    a container they are talking about.
+
+    Refuses anything else loudly: an unrecognised file is never guessed at.
+    """
+    where = source or "document"
+
+    if is_evidence_container(document):
+        found: list[tuple[str, dict]] = []
+        for index, entry in enumerate(document[EVIDENCE_CONTAINER_ARRAY]):
+            json_path = "$.%s[%d]" % (EVIDENCE_CONTAINER_ARRAY, index)
+            if not isinstance(entry, Mapping):
+                raise EvidenceDocumentShapeError(
+                    "%s is a %s, not a cer_reference object: every entry in "
+                    "an evidence container's %r array is a full "
+                    "cer_reference document"
+                    % (
+                        locate_reference(where, json_path),
+                        type(entry).__name__,
+                        EVIDENCE_CONTAINER_ARRAY,
+                    )
+                )
+            found.append((json_path, dict(entry)))
+        return found
+
+    if isinstance(document, Mapping) and DISCRIMINATOR in document:
+        return [("$", dict(document))]
+
+    raise EvidenceDocumentShapeError(
+        "%s is neither a cer_reference nor an evidence container. A "
+        "cer_reference declares %s; an evidence container "
+        "(strategies/<id>/<version>/evidence.json) declares no %s and holds "
+        "its references in a %r array. This document does neither."
+        % (where, DISCRIMINATOR, DISCRIMINATOR, EVIDENCE_CONTAINER_ARRAY)
+    )
+
+
+def read_reference_documents(
+    path: str | os.PathLike,
+) -> list[tuple[str, dict]]:
+    """Read a reference file in either shape, without validating it."""
+    return split_evidence_document(read_json_file(path), source=str(path))
+
+
+def validate_reference_file(
+    path: str | os.PathLike,
+) -> list[tuple[str, dict]]:
+    """Validate every ``cer_reference`` in a file, in either shipped shape.
+
+    Returns the ``(json_path, reference)`` pairs it validated. A failure
+    names the file AND the reference inside it, so a container with one bad
+    entry says which entry and which field.
+    """
+    found = read_reference_documents(path)
+    for json_path, reference in found:
+        validate_reference(reference, source=locate_reference(str(path), json_path))
+    return found
+
+
 class EvidenceReader:
     """THE SEAM between HSA and CER.
 
@@ -295,21 +444,27 @@ class FixtureEvidenceReader(EvidenceReader):
         """Fixture files, in a stable order."""
         return sorted(self.directory.glob("*.json"))
 
-    def _load(self) -> Iterator[tuple[Path, dict]]:
+    def _load(self) -> Iterator[tuple[str, dict]]:
         for path in self.paths():
-            document = read_json_file(path)
-            validate_reference(document, source=str(path))
-            if not is_fixture(document):
-                raise CerError(
-                    "%s declares source %r but lives in the fixture "
-                    "directory; a fixture must declare %s so it can be found "
-                    "and replaced when CER goes live (PID line 181)"
-                    % (path, document.get("source"), SOURCE_CONTRACT_FIXTURE)
-                )
-            yield path, dict(document)
+            for json_path, document in read_reference_documents(path):
+                location = locate_reference(str(path), json_path)
+                validate_reference(document, source=location)
+                if not is_fixture(document):
+                    raise CerError(
+                        "%s declares source %r but lives in the fixture "
+                        "directory; a fixture must declare %s so it can be "
+                        "found and replaced when CER goes live (PID line 181)"
+                        % (location, document.get("source"), SOURCE_CONTRACT_FIXTURE)
+                    )
+                yield location, dict(document)
 
-    def items(self) -> list[tuple[Path, dict]]:
-        """Fixture file paths paired with their validated documents."""
+    def items(self) -> list[tuple[str, dict]]:
+        """Reference locations paired with their validated documents.
+
+        One entry per REFERENCE, not per file: a fixture directory holding
+        evidence containers yields every reference inside them, each labelled
+        with the file and the JSON path it came from.
+        """
         return list(self._load())
 
     def references(self) -> list[dict]:

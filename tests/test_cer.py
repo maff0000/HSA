@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from hsa.cer import (
+    EVIDENCE_CONTAINER_ARRAY,
     IDENTITY_FIELDS,
     KIND,
     OPAQUE_IDENTITY_FIELDS,
@@ -26,6 +27,7 @@ from hsa.cer import (
     SOURCES,
     SUPPORTS,
     CerError,
+    EvidenceDocumentShapeError,
     EvidenceNotFoundError,
     EvidenceReader,
     FixtureEvidenceReader,
@@ -33,16 +35,21 @@ from hsa.cer import (
     build_reference,
     fixtures_dir,
     group_by_reference_type,
+    is_evidence_container,
     is_fixture,
     open_evidence_reader,
+    read_reference_documents,
     reference_types,
+    split_evidence_document,
     validate_reference,
+    validate_reference_file,
 )
 from hsa.commands import cer as cer_command
 from hsa.contracts import read_json_file, validate_document
 from hsa.errors import DocumentInvalidError, HSAError
 
 FIXTURE_PREFIX = "FIXTURE-"
+STRATEGIES = Path(__file__).resolve().parent.parent / "strategies"
 
 
 @pytest.fixture
@@ -152,6 +159,89 @@ def test_fixtures_are_readable_json_with_no_surprises(fixture_paths):
     for path in fixture_paths:
         parsed = json.loads(path.read_text(encoding="utf-8"))
         assert parsed["$hsa_kind"] == KIND
+
+
+# --------------------------------------------------------------------------
+# a fixture describes a shape; it never asserts an outcome
+# --------------------------------------------------------------------------
+
+#: Past-tense verdict phrasings. A fixture that uses one is claiming a gate
+#: was evaluated. None has been: CER is not live. This is a guard, not a
+#: proof — it catches the specific regression that put "the original PROMOTED
+#: version" and "acceptance criteria WERE MET" into this fixture set while
+#: every package in the inventory was still a CANDIDATE.
+_VERDICT_PHRASINGS = (
+    "were met",
+    "was met",
+    "criteria met",
+    "was promoted",
+    "has been promoted",
+    "the original promoted version",
+    "was rejected",
+    "has been rejected",
+    "produced the finding",
+)
+
+
+def test_no_fixture_summary_asserts_a_gate_outcome(fixture_docs):
+    """PID line 181 permits fixtures; it does not permit fictional verdicts."""
+    for document in fixture_docs:
+        summary = document.get("summary", "").lower()
+        for phrasing in _VERDICT_PHRASINGS:
+            assert phrasing not in summary, (
+                "%s %s summary says %r, which asserts an outcome. No gate has "
+                "been evaluated: CER is not live."
+                % (
+                    document["strategy_id"],
+                    document["strategy_version"],
+                    phrasing,
+                )
+            )
+
+
+def _inventory_status(strategy_id: str, strategy_version: str) -> str | None:
+    path = STRATEGIES / strategy_id / strategy_version / "package.json"
+    if not path.is_file():
+        return None
+    return read_json_file(path)["lifecycle"]["status"]
+
+
+def test_fixtures_do_not_contradict_the_inventory_they_name(fixture_docs):
+    """A fixture supporting a decision must not imply the decision was taken.
+
+    Every package in the inventory is a CANDIDATE, because no evidence gate
+    has been evaluated. A PROMOTION or REJECTION fixture naming one of them
+    is a SHAPE offered in support of a decision that has not been made, and
+    the package's own lifecycle is what says so.
+    """
+    for document in fixture_docs:
+        if document.get("supports") not in ("PROMOTION", "REJECTION"):
+            continue
+        status = _inventory_status(
+            document["strategy_id"], document["strategy_version"]
+        )
+        if status is None:
+            continue
+        assert status == "CANDIDATE", (
+            "%s %s is %s in the inventory while its only supporting evidence "
+            "is a CONTRACT_FIXTURE; a fixture is not a gate"
+            % (document["strategy_id"], document["strategy_version"], status)
+        )
+
+
+def test_fixtures_naming_a_version_the_inventory_lacks_are_shape_only(fixture_docs):
+    """The 1.1.0 fixtures must not read as though 1.1.0 exists."""
+    for document in fixture_docs:
+        if _inventory_status(
+            document["strategy_id"], document["strategy_version"]
+        ) is not None:
+            continue
+        summary = document.get("summary", "").lower()
+        assert "shape only" in summary, (
+            "%s %s is not in the inventory, so its fixture must say it is a "
+            "shape and not a record of something that exists"
+            % (document["strategy_id"], document["strategy_version"])
+        )
 
 
 # --------------------------------------------------------------------------
@@ -511,9 +601,20 @@ def test_cer_show_raises_for_unknown_evidence():
 
 
 def test_cer_validate_checks_every_fixture(capsys, fixture_paths):
+    """The tail count is in REFERENCES, not files.
+
+    One file used to mean one reference, so the two counts were the same
+    number and the message said "fixtures". A fixture directory may now hold
+    evidence containers, and one container file carries many references, so
+    the command counts what it actually validated.
+    """
     assert cer_command.run(_parse(["validate"])) == 0
     out = capsys.readouterr().out
-    assert "%d fixtures valid and labelled CONTRACT_FIXTURE" % len(fixture_paths) in out
+    references = sum(
+        len(read_reference_documents(path)) for path in fixture_paths
+    )
+    assert references == len(fixture_paths), "the fixture set is one reference per file"
+    assert "%d references valid and labelled CONTRACT_FIXTURE" % references in out
 
 
 def test_cer_validate_checks_named_files(capsys, fixture_paths):
