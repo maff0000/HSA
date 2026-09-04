@@ -1,0 +1,59 @@
+{
+  "$hsa_evidence": "strategy_evidence_index",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "wick_rejection_sequence",
+  "strategy_version": "0.1.0",
+  "source": "CONTRACT_FIXTURE",
+  "cer_live": false,
+  "description": "CER identity and evidence references for wick_rejection_sequence 0.1.0. CER owns evidence; HSA points at it (PID lines 160-181). CER is not live, so every reference below declares source CONTRACT_FIXTURE and stands in for real evidence (PID line 181). None of these is a result: no run has been executed and nothing here supports promotion. This file is not a permanent evidence store and holds no measurements \u2014 only references, in the shapes hsa/cer.py validates.",
+  "generated_at_utc": "2026-09-04T00:00:00Z",
+  "references": [
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0001-source-analysis",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0001-source-analysis",
+      "reference_type": "SOURCE_ANALYSIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Analysis of the transcribed voice note at strategies/wick_rejection_sequence/0.1.0/source.txt: two discretionary terms recognised, both PARAMETERISED onto a ratified measurement basis per docs/AMBIGUITY-POLICY.md, none guessed, none left unruled.",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0002-hypothesis",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0002-hypothesis",
+      "reference_type": "STRATEGY_HYPOTHESIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Hypothesis anchor for candidate 0.1.0: that a 15M rejection of an extreme followed inside four 15M bars by a one-sided 15M bar in the rejection direction carries information the rejection alone does not. Stated, not shown: no run has been executed.",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0003-lineage",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0003-lineage",
+      "reference_type": "VERSION_LINEAGE",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Lineage anchor for wick_rejection_sequence 0.1.0. This is the original version and supersedes nothing, which the package states as lifecycle.supersedes null. Any later revision becomes a separately versioned candidate rather than an edit here (PID lines 185-189).",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    }
+  ],
+  "evidence_still_owed_before_promotion": [
+    "RESEARCH_FINDING references for the parameter sweeps required by package.evidence_requirements.backtest_requirements.",
+    "PROMOTION_EVIDENCE showing every acceptance criterion in package.acceptance_criteria met, on a sample of at least package.evidence_requirements.minimum_sample_size completed sequences.",
+    "A VERSION_LINEAGE reference against any successor version, which must be a separately versioned candidate rather than an edit to 0.1.0 (PID lines 185-189)."
+  ]
+}

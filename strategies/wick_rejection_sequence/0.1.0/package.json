@@ -1,0 +1,1371 @@
+{
+  "$hsa_kind": "strategy_package",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "wick_rejection_sequence",
+  "strategy_version": "0.1.0",
+  "title": "Wick rejection sequence (PID acceptance Example B)",
+  "description": "PID acceptance Example B (PID line 242), produced as a governed package: a large 15M rejection wick, then a subsequent no-wick directional confirmation, then an optional lower-timeframe trigger. The two discretionary phrases the source used were resolved through hsa intake onto the measurement bases ratified in docs/AMBIGUITY-POLICY.md and declared as bounded parameters on the embedded atomic strategies; see provenance.notes for the attribution. THIS IS A PRODUCT PROOF, NOT A CLAIM OF A PROFITABLE STRATEGY (PID line 244). Every threshold in it was set by the architect, no evidence gate has been passed, and the package is a CANDIDATE.",
+  "thesis": "A bar that traded to an extreme and was returned before its close shows the extreme was not accepted, but rejection alone does not say the return will continue. A following bar that runs its whole range in the rejection direction with no retracement inside the bar is a second, independent observation of one-sided participation. The ordered pair is the claim: rejection establishes the location, the one-sided bar establishes that the move away from it is being carried. Whether the pair carries edge is exactly what the evidence gates exist to decide, and it has not been decided.",
+  "instruments": [
+    "XAUUSD"
+  ],
+  "intended_horizon": "INTRADAY",
+  "intended_style": "Discretionary intraday price-action sequence trading on XAUUSD, mechanised. Evaluated on closed bars only, with a bounded live window and no intrabar decision.",
+  "required_hermes_fields": [
+    {
+      "field": "candle.open",
+      "purpose": "Open of the evaluated 15M bar. Consumed by rejection_wick and no_wick_candle to locate the body.",
+      "timeframe": "15M"
+    },
+    {
+      "field": "candle.high",
+      "purpose": "High of the evaluated 15M bar. Upper bound of the bar range and top of the upper wick.",
+      "timeframe": "15M"
+    },
+    {
+      "field": "candle.low",
+      "purpose": "Low of the evaluated 15M bar. Lower bound of the bar range and bottom of the lower wick.",
+      "timeframe": "15M"
+    },
+    {
+      "field": "candle.close",
+      "purpose": "Close of the evaluated 15M bar. Fixes the body with candle.open and fixes direction.",
+      "timeframe": "15M"
+    },
+    {
+      "field": "atr",
+      "purpose": "Average true range on 15M over atr_period, used by both 15M atomics as the bar-range floor beneath which the wick ratios are not read.",
+      "timeframe": "15M"
+    },
+    {
+      "field": "range.high",
+      "purpose": "Highest high of the preceding range_lookback 5M bars, excluding the evaluated bar. Consumed by the optional range_breakout trigger.",
+      "timeframe": "5M"
+    },
+    {
+      "field": "range.low",
+      "purpose": "Lowest low of the preceding range_lookback 5M bars, excluding the evaluated bar. Consumed by the optional range_breakout trigger.",
+      "timeframe": "5M"
+    },
+    {
+      "field": "candle.close",
+      "purpose": "Close of the evaluated 5M bar, tested against the 5M range boundaries by the optional range_breakout trigger. Declared separately from the 15M entry because it is a different fact on a different timeframe.",
+      "timeframe": "5M"
+    }
+  ],
+  "atomic_strategies": [
+    {
+      "$hsa_kind": "atomic_strategy",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "rejection_wick",
+      "strategy_version": "1.0.0",
+      "title": "Rejection wick",
+      "description": "A bar whose wick on one side is at least wick_to_range_ratio_min of the bar range, whose body is at most body_to_range_ratio_max of the bar range, and whose opposing wick is at most opposing_wick_to_range_ratio_max of the bar range. The bar range must also be at least min_range_atr_multiple of ATR, so the shape is not read from a bar too compressed to carry it.",
+      "thesis": "Price traded through a level and was returned before the close, so the extreme was not accepted. The proportion of the bar spent beyond the eventual close is the measurable trace of that rejection.",
+      "instruments": [
+        "XAUUSD"
+      ],
+      "required_hermes_fields": [
+        {
+          "field": "candle.open",
+          "purpose": "Open of the evaluated bar.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.high",
+          "purpose": "High of the evaluated bar, used for the upper wick.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.low",
+          "purpose": "Low of the evaluated bar, used for the lower wick.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.close",
+          "purpose": "Close of the evaluated bar.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "atr",
+          "purpose": "Average true range over atr_period, used to scale the minimum bar range.",
+          "timeframe": "15M"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "wick_to_range_ratio_min",
+          "description": "Minimum length of the rejecting wick divided by the total bar range (candle.high minus candle.low). This is the measurable replacement for the discretionary wick-size phrase at PID.md line 114.",
+          "type": "number",
+          "default": 0.6,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.3,
+            "maximum": 0.95
+          }
+        },
+        {
+          "name": "body_to_range_ratio_max",
+          "description": "Maximum body length, the absolute difference of open and close, divided by the total bar range.",
+          "type": "number",
+          "default": 0.35,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.05,
+            "maximum": 0.7
+          }
+        },
+        {
+          "name": "opposing_wick_to_range_ratio_max",
+          "description": "Maximum length of the wick opposite the rejecting wick, divided by the total bar range. Bounding it excludes bars with a wick on each side, which express indecision rather than rejection of one extreme.",
+          "type": "number",
+          "default": 0.25,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 0.6
+          }
+        },
+        {
+          "name": "min_range_atr_multiple",
+          "description": "Minimum total bar range as a multiple of ATR. Ratios computed on a bar range that is a fraction of prevailing volatility are dominated by rounding rather than by rejection.",
+          "type": "number",
+          "default": 0.5,
+          "units": "atr_multiples",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 5.0
+          }
+        },
+        {
+          "name": "atr_period",
+          "description": "Lookback of the average true range used by min_range_atr_multiple, in bars of the evaluated timeframe.",
+          "type": "integer",
+          "default": 14,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 2,
+            "maximum": 100,
+            "step": 1
+          }
+        }
+      ],
+      "direction_semantics": {
+        "emits": [
+          "LONG",
+          "SHORT"
+        ],
+        "direction_rule": "LONG when the lower wick, from min(open, close) down to candle.low, is the rejecting wick; SHORT when the upper wick, from candle.high down to max(open, close), is the rejecting wick.",
+        "inversion_allowed": false
+      },
+      "output_contract": {
+        "signal_type": "BOOLEAN",
+        "fields": [
+          {
+            "name": "matched",
+            "type": "boolean",
+            "description": "True when every declared ratio condition holds on the evaluated bar."
+          },
+          {
+            "name": "direction",
+            "type": "string",
+            "description": "LONG for a lower-wick rejection, SHORT for an upper-wick rejection."
+          },
+          {
+            "name": "wick_ratio",
+            "type": "number",
+            "description": "Rejecting wick length divided by the total bar range."
+          },
+          {
+            "name": "body_ratio",
+            "type": "number",
+            "description": "Body length divided by the total bar range."
+          },
+          {
+            "name": "opposing_wick_ratio",
+            "type": "number",
+            "description": "Opposing wick length divided by the total bar range."
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "description": "Each ratio condition, its threshold and whether it held."
+          }
+        ],
+        "reason_field": "reason",
+        "emits_on_insufficient_history": "NULL"
+      },
+      "deterministic_test_cases": [
+        {
+          "case_id": "lower_wick_rejection_matches",
+          "description": "Bar range 10.0, lower wick 7.0 (0.7), body 2.0 (0.2), upper wick 1.0 (0.1), ATR 8.0 so the range clears 0.5 ATR.",
+          "given_hermes_facts": {
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_min": 0.6,
+            "body_to_range_ratio_max": 0.35,
+            "opposing_wick_to_range_ratio_max": 0.25,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "LONG",
+            "wick_ratio": 0.7,
+            "body_ratio": 0.2,
+            "opposing_wick_ratio": 0.1
+          }
+        },
+        {
+          "case_id": "upper_wick_rejection_matches",
+          "description": "Bar range 10.0, upper wick 7.0 (0.7), body 2.0 (0.2), lower wick 1.0 (0.1), ATR 8.0.",
+          "given_hermes_facts": {
+            "candle.open": 2003.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2001.0,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_min": 0.6,
+            "body_to_range_ratio_max": 0.35,
+            "opposing_wick_to_range_ratio_max": 0.25,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "SHORT",
+            "wick_ratio": 0.7,
+            "body_ratio": 0.2,
+            "opposing_wick_ratio": 0.1
+          }
+        },
+        {
+          "case_id": "wick_ratio_below_threshold_does_not_match",
+          "description": "Bar range 10.0 with a lower wick of 4.0 (0.4), which fails the 0.6 threshold.",
+          "given_hermes_facts": {
+            "candle.open": 2004.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2008.0,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_min": 0.6,
+            "body_to_range_ratio_max": 0.35,
+            "opposing_wick_to_range_ratio_max": 0.25,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": false,
+            "wick_ratio": 0.4
+          }
+        },
+        {
+          "case_id": "both_wicks_present_does_not_match",
+          "description": "Bar range 10.0 with a lower wick of 4.5 and an upper wick of 4.5, which fails both the rejecting-wick and the opposing-wick conditions.",
+          "given_hermes_facts": {
+            "candle.open": 2004.5,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2005.5,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_min": 0.6,
+            "body_to_range_ratio_max": 0.35,
+            "opposing_wick_to_range_ratio_max": 0.25,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": false,
+            "wick_ratio": 0.45,
+            "opposing_wick_ratio": 0.45
+          }
+        }
+      ],
+      "provenance": {
+        "source_type": "MATT_OBSERVATION",
+        "source_reference": "PID.md line 55 \u2014 rejection wick; and PID.md line 242, the 15m rejection wick opening acceptance example B.",
+        "ingested_at_utc": "2026-09-04T00:00:00Z",
+        "notes": "Architect-set defaults quantifying the wick-size phrase at PID line 114. The measurement basis \u2014 wick length relative to bar range \u2014 is defined, so per the ambiguity policy in docs/AMBIGUITY-POLICY.md the unset thresholds become declared parameters rather than an escalation. Values 0.6 / 0.35 / 0.25 / 0.5 were set by the architect and carry no evidential support yet."
+      },
+      "doctrine_assertions": {
+        "self_contained": true,
+        "independently_testable": true,
+        "deterministic": true,
+        "execution_blind": true,
+        "unaware_of_other_strategies": true,
+        "hermes_driven": true
+      }
+    },
+    {
+      "$hsa_kind": "atomic_strategy",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "no_wick_candle",
+      "strategy_version": "1.0.0",
+      "title": "No-wick directional candle",
+      "description": "A bar whose body occupies at least body_to_range_ratio_min of the bar range and whose upper and lower wicks are each at most wick_to_range_ratio_max of the bar range. The bar range must also be at least min_range_atr_multiple of ATR.",
+      "thesis": "A bar that opens at one extreme and closes at the other was directional for its whole duration, with no return to the opening area. That absence of retracement inside the bar is the measurable trace of one-sided participation.",
+      "instruments": [
+        "XAUUSD"
+      ],
+      "required_hermes_fields": [
+        {
+          "field": "candle.open",
+          "purpose": "Open of the evaluated bar.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.high",
+          "purpose": "High of the evaluated bar, used for the upper wick.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.low",
+          "purpose": "Low of the evaluated bar, used for the lower wick.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "candle.close",
+          "purpose": "Close of the evaluated bar.",
+          "timeframe": "15M"
+        },
+        {
+          "field": "atr",
+          "purpose": "Average true range over atr_period, used to scale the minimum bar range.",
+          "timeframe": "15M"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "wick_to_range_ratio_max",
+          "description": "Maximum length of either wick divided by the total bar range. This is the measurable definition of no wick: a wick is permitted up to this fraction and no further.",
+          "type": "number",
+          "default": 0.1,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 0.3
+          }
+        },
+        {
+          "name": "body_to_range_ratio_min",
+          "description": "Minimum body length, the absolute difference of open and close, divided by the total bar range.",
+          "type": "number",
+          "default": 0.8,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.5,
+            "maximum": 1.0
+          }
+        },
+        {
+          "name": "min_range_atr_multiple",
+          "description": "Minimum total bar range as a multiple of ATR, so a bar too compressed to express direction cannot satisfy the ratios by rounding.",
+          "type": "number",
+          "default": 0.5,
+          "units": "atr_multiples",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 5.0
+          }
+        },
+        {
+          "name": "atr_period",
+          "description": "Lookback of the average true range used by min_range_atr_multiple, in bars of the evaluated timeframe.",
+          "type": "integer",
+          "default": 14,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 2,
+            "maximum": 100,
+            "step": 1
+          }
+        }
+      ],
+      "direction_semantics": {
+        "emits": [
+          "LONG",
+          "SHORT"
+        ],
+        "direction_rule": "LONG when candle.close is above candle.open; SHORT when candle.close is below candle.open. A bar whose close equals its open cannot satisfy body_to_range_ratio_min and therefore never matches.",
+        "inversion_allowed": false
+      },
+      "output_contract": {
+        "signal_type": "BOOLEAN",
+        "fields": [
+          {
+            "name": "matched",
+            "type": "boolean",
+            "description": "True when the body and both wick conditions hold on the evaluated bar."
+          },
+          {
+            "name": "direction",
+            "type": "string",
+            "description": "LONG for an up bar, SHORT for a down bar."
+          },
+          {
+            "name": "body_ratio",
+            "type": "number",
+            "description": "Body length divided by the total bar range."
+          },
+          {
+            "name": "upper_wick_ratio",
+            "type": "number",
+            "description": "Upper wick length divided by the total bar range."
+          },
+          {
+            "name": "lower_wick_ratio",
+            "type": "number",
+            "description": "Lower wick length divided by the total bar range."
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "description": "Each ratio condition, its threshold and whether it held."
+          }
+        ],
+        "reason_field": "reason",
+        "emits_on_insufficient_history": "NULL"
+      },
+      "deterministic_test_cases": [
+        {
+          "case_id": "up_marubozu_matches",
+          "description": "Bar range 10.0, body 9.0 (0.9), upper wick 0.5 (0.05), lower wick 0.5 (0.05), ATR 8.0.",
+          "given_hermes_facts": {
+            "candle.open": 2000.5,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.5,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_max": 0.1,
+            "body_to_range_ratio_min": 0.8,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "LONG",
+            "body_ratio": 0.9,
+            "upper_wick_ratio": 0.05,
+            "lower_wick_ratio": 0.05
+          }
+        },
+        {
+          "case_id": "down_marubozu_matches",
+          "description": "Bar range 10.0, body 9.0 (0.9) closing downward, upper wick 0.5, lower wick 0.5, ATR 8.0.",
+          "given_hermes_facts": {
+            "candle.open": 2009.5,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2000.5,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_max": 0.1,
+            "body_to_range_ratio_min": 0.8,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "SHORT",
+            "body_ratio": 0.9,
+            "upper_wick_ratio": 0.05,
+            "lower_wick_ratio": 0.05
+          }
+        },
+        {
+          "case_id": "upper_wick_over_threshold_does_not_match",
+          "description": "Bar range 10.0 with an upper wick of 3.0 (0.3), which fails the 0.1 threshold.",
+          "given_hermes_facts": {
+            "candle.open": 2000.5,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2007.0,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_max": 0.1,
+            "body_to_range_ratio_min": 0.8,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": false,
+            "upper_wick_ratio": 0.3,
+            "body_ratio": 0.65
+          }
+        },
+        {
+          "case_id": "range_below_atr_floor_does_not_match",
+          "description": "Ratios all pass but the bar range of 1.0 is 0.125 of an ATR of 8.0, failing the 0.5 ATR floor.",
+          "given_hermes_facts": {
+            "candle.open": 2000.05,
+            "candle.high": 2001.0,
+            "candle.low": 2000.0,
+            "candle.close": 2000.95,
+            "atr": 8.0
+          },
+          "given_parameters": {
+            "wick_to_range_ratio_max": 0.1,
+            "body_to_range_ratio_min": 0.8,
+            "min_range_atr_multiple": 0.5,
+            "atr_period": 14
+          },
+          "expected_output": {
+            "matched": false,
+            "body_ratio": 0.9
+          }
+        }
+      ],
+      "provenance": {
+        "source_type": "MATT_OBSERVATION",
+        "source_reference": "PID.md line 55 \u2014 no-wick candle; and PID.md line 242, the no-wick directional confirmation step of acceptance example B.",
+        "ingested_at_utc": "2026-09-04T00:00:00Z",
+        "notes": "Architect-set defaults. No wick is a proportion, not an absolute: a bar with a wick of zero length is vanishingly rare, so the term is expressed as wick_to_range_ratio_max with an architect-set default of 0.1 and no evidential support yet."
+      },
+      "doctrine_assertions": {
+        "self_contained": true,
+        "independently_testable": true,
+        "deterministic": true,
+        "execution_blind": true,
+        "unaware_of_other_strategies": true,
+        "hermes_driven": true
+      }
+    },
+    {
+      "$hsa_kind": "atomic_strategy",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "range_breakout",
+      "strategy_version": "1.0.0",
+      "title": "Range breakout",
+      "description": "The close of the evaluated bar sits beyond the high or the low of the preceding consolidation range by at least break_margin_ratio of the range height.",
+      "thesis": "A close outside a consolidation range by more than the declared margin indicates that accumulated order flow has resolved in one direction rather than oscillating within the range.",
+      "instruments": [
+        "XAUUSD"
+      ],
+      "required_hermes_fields": [
+        {
+          "field": "range.high",
+          "purpose": "Highest high of the preceding range_lookback bars, excluding the evaluated bar.",
+          "timeframe": "5M"
+        },
+        {
+          "field": "range.low",
+          "purpose": "Lowest low of the preceding range_lookback bars, excluding the evaluated bar.",
+          "timeframe": "5M"
+        },
+        {
+          "field": "candle.close",
+          "purpose": "Close of the evaluated bar.",
+          "timeframe": "5M"
+        }
+      ],
+      "parameters": [
+        {
+          "name": "range_lookback",
+          "description": "Number of bars used to define the consolidation range.",
+          "type": "integer",
+          "default": 12,
+          "units": "bars",
+          "allowed_range": {
+            "minimum": 3,
+            "maximum": 96,
+            "step": 1
+          }
+        },
+        {
+          "name": "break_margin_ratio",
+          "description": "Minimum distance the close must sit beyond the range boundary, as a fraction of the range height (range.high minus range.low). This is the measurable replacement for an unquantified judgement of breakout quality.",
+          "type": "number",
+          "default": 0.1,
+          "units": "ratio",
+          "allowed_range": {
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        }
+      ],
+      "direction_semantics": {
+        "emits": [
+          "LONG",
+          "SHORT"
+        ],
+        "direction_rule": "LONG when candle.close is at least range.high plus break_margin_ratio times the range height; SHORT when candle.close is at or below range.low minus break_margin_ratio times the range height.",
+        "inversion_allowed": false
+      },
+      "output_contract": {
+        "signal_type": "BOOLEAN",
+        "fields": [
+          {
+            "name": "matched",
+            "type": "boolean",
+            "description": "True when the close clears a range boundary by the required margin."
+          },
+          {
+            "name": "direction",
+            "type": "string",
+            "description": "LONG for a break above range.high, SHORT for a break below range.low."
+          },
+          {
+            "name": "break_distance_ratio",
+            "type": "number",
+            "description": "Distance of the close beyond the breached boundary divided by the range height."
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "description": "Which boundary was tested, the required margin and the observed distance."
+          }
+        ],
+        "reason_field": "reason",
+        "emits_on_insufficient_history": "NULL"
+      },
+      "deterministic_test_cases": [
+        {
+          "case_id": "break_above_matches",
+          "description": "Range height is 10.0; the close sits 2.0 above range.high, which is 0.2 of the range height and clears the 0.1 margin.",
+          "given_hermes_facts": {
+            "range.high": 2010.0,
+            "range.low": 2000.0,
+            "candle.close": 2012.0
+          },
+          "given_parameters": {
+            "range_lookback": 12,
+            "break_margin_ratio": 0.1
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "LONG",
+            "break_distance_ratio": 0.2
+          }
+        },
+        {
+          "case_id": "break_below_matches",
+          "description": "Range height is 10.0; the close sits 1.5 below range.low, which is 0.15 of the range height and clears the 0.1 margin.",
+          "given_hermes_facts": {
+            "range.high": 2010.0,
+            "range.low": 2000.0,
+            "candle.close": 1998.5
+          },
+          "given_parameters": {
+            "range_lookback": 12,
+            "break_margin_ratio": 0.1
+          },
+          "expected_output": {
+            "matched": true,
+            "direction": "SHORT",
+            "break_distance_ratio": 0.15
+          }
+        },
+        {
+          "case_id": "margin_not_cleared_does_not_match",
+          "description": "The close sits 0.5 above range.high, which is 0.05 of the range height and fails the 0.1 margin.",
+          "given_hermes_facts": {
+            "range.high": 2010.0,
+            "range.low": 2000.0,
+            "candle.close": 2010.5
+          },
+          "given_parameters": {
+            "range_lookback": 12,
+            "break_margin_ratio": 0.1
+          },
+          "expected_output": {
+            "matched": false,
+            "break_distance_ratio": 0.05
+          }
+        }
+      ],
+      "provenance": {
+        "source_type": "MATT_OBSERVATION",
+        "source_reference": "PID.md line 55 \u2014 breakout, named as a canonical atomic strategy for HSA v1.",
+        "ingested_at_utc": "2026-09-04T00:00:00Z",
+        "notes": "Architect-set default: break_margin_ratio 0.1 quantifies the otherwise discretionary breakout-quality phrase at PID line 118. The measurement basis \u2014 distance beyond the boundary relative to range height \u2014 is defined; only the threshold was architect-set, so this is a declared parameter rather than an escalation."
+      },
+      "doctrine_assertions": {
+        "self_contained": true,
+        "independently_testable": true,
+        "deterministic": true,
+        "execution_blind": true,
+        "unaware_of_other_strategies": true,
+        "hermes_driven": true
+      }
+    }
+  ],
+  "timeframe_roles": {
+    "LOCATION": "15M",
+    "CONFIRMATION": "15M",
+    "TRIGGER": "5M"
+  },
+  "chain": {
+    "$hsa_kind": "chain",
+    "$hsa_contract_version": "1.0.0",
+    "chain_id": "wick_rejection_sequence_chain",
+    "chain_version": "0.1.0",
+    "title": "Rejection wick, no-wick confirmation, optional 5M breakout trigger",
+    "description": "A SEQUENCE of three atomic steps in ascending sequence_index order. Step 1 is a 15M rejection_wick. Step 2 is a 15M no_wick_candle in the direction step 1 latched. Step 3 is a 5M range_breakout and is optional: it is evaluated and reported, and its non-match never prevents the chain matching. Steps 1 and 2 are required, so the optional step 3 can never be the sole cause of a match (docs/COMPOSITION-DOCTRINE.md section 6).",
+    "instruments": [
+      "XAUUSD"
+    ],
+    "primitive": "SEQUENCE",
+    "inputs": [
+      {
+        "input_id": "rejection_wick_15m",
+        "strategy_id": "rejection_wick",
+        "strategy_version": "1.0.0",
+        "timeframe_role": "LOCATION",
+        "timeframe": "15M",
+        "direction": "EITHER",
+        "sequence_index": 1
+      },
+      {
+        "input_id": "no_wick_confirmation_15m",
+        "strategy_id": "no_wick_candle",
+        "strategy_version": "1.0.0",
+        "timeframe_role": "CONFIRMATION",
+        "timeframe": "15M",
+        "direction": "INHERIT",
+        "sequence_index": 2
+      },
+      {
+        "input_id": "range_breakout_5m",
+        "strategy_id": "range_breakout",
+        "strategy_version": "1.0.0",
+        "timeframe_role": "TRIGGER",
+        "timeframe": "5M",
+        "direction": "INHERIT",
+        "sequence_index": 3,
+        "optional": true
+      }
+    ],
+    "timeframe_roles": {
+      "LOCATION": "15M",
+      "CONFIRMATION": "15M",
+      "TRIGGER": "5M"
+    },
+    "state_semantics": {
+      "stateful": true,
+      "states": [
+        "IDLE",
+        "WICK_SEEN",
+        "CONFIRMED",
+        "CONFIRMED_TRIGGERED",
+        "EXPIRED"
+      ],
+      "initial_state": "IDLE",
+      "state_transition_rule": "IDLE -> WICK_SEEN when step 1 (rejection_wick, 15M) matches; the resolved direction and the step 1 bar index are latched at this transition. WICK_SEEN -> CONFIRMED when step 2 (no_wick_candle, 15M) matches in the latched direction on a bar strictly after the step 1 bar and within confirmation_window_bars 5M bars of it; the chain asserts its match on entering CONFIRMED, because steps 1 and 2 are the required inputs and together they are the whole cause of the match. CONFIRMED -> CONFIRMED_TRIGGERED when the optional step 3 (range_breakout, 5M) matches in the latched direction within trigger_window_bars 5M bars of the step 2 bar; this transition records that the optional trigger fired and does NOT change whether the chain matched. WICK_SEEN -> EXPIRED when confirmation_window_bars elapses without step 2. CONFIRMED or CONFIRMED_TRIGGERED -> EXPIRED when trigger_window_bars elapses after the step 2 bar. EXPIRED -> IDLE on the next evaluation, which is what re-arms the chain.",
+      "reset_conditions": [
+        "confirmation_window_bars 5M bars elapse in WICK_SEEN without step 2 matching.",
+        "trigger_window_bars 5M bars elapse after the step 2 bar, in CONFIRMED or CONFIRMED_TRIGGERED.",
+        "Step 2 matches in the direction opposite to the direction latched at step 1: the sequence is abandoned rather than re-directed.",
+        "An invalidation condition fires while the chain is in WICK_SEEN, CONFIRMED or CONFIRMED_TRIGGERED."
+      ]
+    },
+    "direction_semantics": {
+      "emits": [
+        "LONG",
+        "SHORT"
+      ],
+      "direction_rule": "Direction is established by step 1 and is not re-derived afterwards. The rejection_wick input runs with direction EITHER, so it may fire LONG (a lower-wick rejection) or SHORT (an upper-wick rejection), and whichever it fires becomes the chain's resolved direction. Steps 2 and 3 run with direction INHERIT and must equal that resolved direction; an input firing the opposite way is a non-match, not a match, and the non-match reason must name the disagreeing input and both directions. The chain never emits NEUTRAL: a sequence whose direction is undetermined has not matched.",
+      "inversion_allowed": false
+    },
+    "timing": {
+      "evaluation_trigger": "BAR_CLOSE",
+      "evaluation_timeframe": "5M",
+      "sequence_window": {
+        "max_bars": 21,
+        "timeframe": "5M"
+      }
+    },
+    "persistence": {
+      "signal_persists": true,
+      "persist_for_bars": 9,
+      "persist_timeframe": "5M",
+      "re_arm_rule": "The chain re-arms only from IDLE. While a match is asserted, a further rejection_wick match does not start a second concurrent sequence; it is reported in the explanation and discarded. Once the asserted match expires and the chain returns to IDLE, the next rejection_wick match starts a new sequence."
+    },
+    "expiry": {
+      "expires": true,
+      "expires_after_bars": 9,
+      "expiry_timeframe": "5M",
+      "expiry_rule": "An asserted match goes stale 9 5M bars (three 15M bars) after the close of the step 2 bar that produced it, whether or not the optional step 3 trigger ever fired. A partial sequence holding only step 1 goes stale 12 5M bars (four 15M bars) after the step 1 bar, which is the confirmation_window_bars budget. Both horizons are counted in closed 5M bars on the chain's evaluation timeframe."
+    },
+    "explanation_contract": {
+      "emit_reason_on_match": true,
+      "emit_reason_on_non_match": true,
+      "per_input_evaluation_reported": true,
+      "reason_fields": [
+        "reason"
+      ]
+    },
+    "composition_assertions": {
+      "inputs_are_atomic_only": true,
+      "component_identity_preserved": true,
+      "no_chain_of_chain": true
+    },
+    "provenance": {
+      "source_type": "TRADER_EXPLANATION",
+      "source_reference": "strategies/wick_rejection_sequence/0.1.0/source.txt",
+      "ingested_at_utc": "2026-09-04T00:00:00Z",
+      "excerpt": "Once those two are in, I will drop to the 5m chart and look for a range breakout to time the entry. That step is optional.",
+      "notes": "The ordering, the four-15M-bar confirmation budget, the three-15M-bar live window and the optionality of the 5M step are all stated by the source. HSA supplied no ordering the source did not give."
+    }
+  },
+  "direction_semantics": {
+    "emits": [
+      "LONG",
+      "SHORT"
+    ],
+    "direction_rule": "Direction is established by step 1 and is not re-derived afterwards. The rejection_wick input runs with direction EITHER, so it may fire LONG (a lower-wick rejection) or SHORT (an upper-wick rejection), and whichever it fires becomes the chain's resolved direction. Steps 2 and 3 run with direction INHERIT and must equal that resolved direction; an input firing the opposite way is a non-match, not a match, and the non-match reason must name the disagreeing input and both directions. The chain never emits NEUTRAL: a sequence whose direction is undetermined has not matched.",
+    "inversion_allowed": false
+  },
+  "timing": {
+    "evaluation_trigger": "BAR_CLOSE",
+    "evaluation_timeframe": "5M",
+    "sequence_window": {
+      "max_bars": 21,
+      "timeframe": "5M"
+    }
+  },
+  "persistence": {
+    "signal_persists": true,
+    "persist_for_bars": 9,
+    "persist_timeframe": "5M",
+    "re_arm_rule": "The chain re-arms only from IDLE. While a match is asserted, a further rejection_wick match does not start a second concurrent sequence; it is reported in the explanation and discarded. Once the asserted match expires and the chain returns to IDLE, the next rejection_wick match starts a new sequence."
+  },
+  "expiry": {
+    "expires": true,
+    "expires_after_bars": 9,
+    "expiry_timeframe": "5M",
+    "expiry_rule": "An asserted match goes stale 9 5M bars (three 15M bars) after the close of the step 2 bar that produced it, whether or not the optional step 3 trigger ever fired. A partial sequence holding only step 1 goes stale 12 5M bars (four 15M bars) after the step 1 bar, which is the confirmation_window_bars budget. Both horizons are counted in closed 5M bars on the chain's evaluation timeframe."
+  },
+  "state_semantics": {
+    "stateful": true,
+    "states": [
+      "IDLE",
+      "WICK_SEEN",
+      "CONFIRMED",
+      "CONFIRMED_TRIGGERED",
+      "EXPIRED"
+    ],
+    "initial_state": "IDLE",
+    "state_transition_rule": "IDLE -> WICK_SEEN when step 1 (rejection_wick, 15M) matches; the resolved direction and the step 1 bar index are latched at this transition. WICK_SEEN -> CONFIRMED when step 2 (no_wick_candle, 15M) matches in the latched direction on a bar strictly after the step 1 bar and within confirmation_window_bars 5M bars of it; the chain asserts its match on entering CONFIRMED, because steps 1 and 2 are the required inputs and together they are the whole cause of the match. CONFIRMED -> CONFIRMED_TRIGGERED when the optional step 3 (range_breakout, 5M) matches in the latched direction within trigger_window_bars 5M bars of the step 2 bar; this transition records that the optional trigger fired and does NOT change whether the chain matched. WICK_SEEN -> EXPIRED when confirmation_window_bars elapses without step 2. CONFIRMED or CONFIRMED_TRIGGERED -> EXPIRED when trigger_window_bars elapses after the step 2 bar. EXPIRED -> IDLE on the next evaluation, which is what re-arms the chain.",
+    "reset_conditions": [
+      "confirmation_window_bars 5M bars elapse in WICK_SEEN without step 2 matching.",
+      "trigger_window_bars 5M bars elapse after the step 2 bar, in CONFIRMED or CONFIRMED_TRIGGERED.",
+      "Step 2 matches in the direction opposite to the direction latched at step 1: the sequence is abandoned rather than re-directed.",
+      "An invalidation condition fires while the chain is in WICK_SEEN, CONFIRMED or CONFIRMED_TRIGGERED."
+    ]
+  },
+  "invalidation_conditions": [
+    "In WICK_SEEN, a 15M bar closes beyond the extreme of the step 1 rejection wick in the direction the wick rejected: the rejection was itself rejected and the premise is gone.",
+    "In WICK_SEEN, confirmation_window_bars 5M bars elapse without a no_wick_candle match in the latched direction.",
+    "In WICK_SEEN, a no_wick_candle matches in the direction opposite to the latched direction.",
+    "In CONFIRMED or CONFIRMED_TRIGGERED, trigger_window_bars 5M bars elapse and the asserted match is consumed by nothing.",
+    "In any non-IDLE state, HERMES reports no atr value for the 15M timeframe, so the bar-range floor both 15M atomics depend on cannot be evaluated."
+  ],
+  "validity_conditions": [
+    "XAUUSD on a 15M chart with a 5M chart available for the optional trigger.",
+    "A 15M atr value is published and the evaluated 15M bar range is at least min_range_atr_multiple of it; below that floor the wick ratios are dominated by rounding rather than by rejection.",
+    "Bars close on schedule: the sequence is counted in closed 5M bars, so a session gap that suppresses bar closes suspends the count rather than advancing it.",
+    "Sessions in which two-sided 15M bars are produced at all. In a session that prints only one-sided bars there is no rejection wick to start the sequence, and dormancy is the correct behaviour rather than a failure (PID line 195)."
+  ],
+  "parameters": [
+    {
+      "name": "confirmation_window_bars",
+      "description": "Maximum number of closed 5M bars from the step 1 rejection wick bar to the step 2 no-wick bar. The default of 12 is the source's 'within four 15m bars' expressed on the chain's 5M evaluation timeframe. Owned at package level because it is a property of the composition, not of any atomic.",
+      "type": "integer",
+      "default": 12,
+      "units": "bars",
+      "allowed_range": {
+        "minimum": 1,
+        "maximum": 48,
+        "step": 1
+      }
+    },
+    {
+      "name": "trigger_window_bars",
+      "description": "Number of closed 5M bars for which the match stays asserted after the step 2 bar, and therefore the budget within which the optional step 3 trigger may still fire. The default of 9 is the source's 'stays live for three 15m bars' expressed on the 5M evaluation timeframe. Equal to persistence.persist_for_bars and to expiry.expires_after_bars by construction.",
+      "type": "integer",
+      "default": 9,
+      "units": "bars",
+      "allowed_range": {
+        "minimum": 1,
+        "maximum": 36,
+        "step": 1
+      }
+    }
+  ],
+  "output_contract": {
+    "signal_type": "STATE",
+    "fields": [
+      {
+        "name": "state",
+        "type": "string",
+        "description": "One of the declared states in state_semantics.states."
+      },
+      {
+        "name": "matched",
+        "type": "boolean",
+        "description": "True while the chain is in CONFIRMED or CONFIRMED_TRIGGERED, which are the states reached by the required steps alone."
+      },
+      {
+        "name": "direction",
+        "type": "string",
+        "description": "The direction latched at step 1: LONG or SHORT. Absent while the chain is IDLE."
+      },
+      {
+        "name": "trigger_confirmed",
+        "type": "boolean",
+        "description": "True when the optional 5M range_breakout also matched. Reported for evidence and never used to gate matched."
+      },
+      {
+        "name": "sequence_step_reached",
+        "type": "integer",
+        "description": "Highest sequence_index satisfied so far: 0, 1, 2 or 3."
+      },
+      {
+        "name": "bars_since_step_one",
+        "type": "integer",
+        "description": "Closed 5M bars since the step 1 bar, against which confirmation_window_bars is counted."
+      },
+      {
+        "name": "bars_since_step_two",
+        "type": "integer",
+        "description": "Closed 5M bars since the step 2 bar, against which trigger_window_bars and expiry are counted."
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "description": "Per-input attribution for the current result on both match and non-match, assembled from each atomic's own reason field and naming the step that did or did not advance the sequence."
+      }
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "sequence_completes_with_optional_trigger",
+      "description": "All three steps in order inside the window. Step 1 is a lower-wick rejection on 15M at 5M bar index 0 (wick ratio 0.7 against the 0.6 floor), latching LONG. Step 2 is an up marubozu on 15M at index 3 (both wick ratios 0.05 against the 0.1 cap), inheriting LONG. Step 3 is a 5M break above range.high at index 5 by 0.2 of range height against the 0.1 margin, inheriting LONG.",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "15M",
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 3,
+            "timeframe": "15M",
+            "candle.open": 2009.0,
+            "candle.high": 2018.5,
+            "candle.low": 2008.5,
+            "candle.close": 2018.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 5,
+            "timeframe": "5M",
+            "range.high": 2018.5,
+            "range.low": 2008.5,
+            "candle.close": 2020.5
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "CONFIRMED_TRIGGERED",
+        "matched": true,
+        "direction": "LONG",
+        "trigger_confirmed": true,
+        "sequence_step_reached": 3
+      }
+    },
+    {
+      "case_id": "sequence_matches_without_optional_trigger",
+      "description": "The same steps 1 and 2, with no 5M range_breakout anywhere in the window. The chain still matches, because steps 1 and 2 are the required inputs and the optional step only adds information. This case is what makes the optional flag observable rather than nominal (PID line 242).",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "15M",
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 3,
+            "timeframe": "15M",
+            "candle.open": 2009.0,
+            "candle.high": 2018.5,
+            "candle.low": 2008.5,
+            "candle.close": 2018.0,
+            "atr": 8.0
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "CONFIRMED",
+        "matched": true,
+        "direction": "LONG",
+        "trigger_confirmed": false,
+        "sequence_step_reached": 2
+      }
+    },
+    {
+      "case_id": "optional_trigger_alone_does_not_match",
+      "description": "The optional 5M range_breakout fires with no preceding rejection wick and no no-wick confirmation. The chain does not match and stays IDLE. An optional input can never be the sole cause of a match (docs/COMPOSITION-DOCTRINE.md section 6).",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "5M",
+            "range.high": 2018.5,
+            "range.low": 2008.5,
+            "candle.close": 2020.5
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "IDLE",
+        "matched": false,
+        "trigger_confirmed": false,
+        "sequence_step_reached": 0
+      }
+    },
+    {
+      "case_id": "steps_out_of_order_do_not_match",
+      "description": "The no-wick 15M bar closes first and the rejection wick closes after it. SEQUENCE requires ascending sequence_index order, so step 2 arriving before step 1 does not advance the chain; the later wick leaves it in WICK_SEEN awaiting a step 2 that has not yet occurred.",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "15M",
+            "candle.open": 2009.0,
+            "candle.high": 2018.5,
+            "candle.low": 2008.5,
+            "candle.close": 2018.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 3,
+            "timeframe": "15M",
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "WICK_SEEN",
+        "matched": false,
+        "trigger_confirmed": false,
+        "sequence_step_reached": 1
+      }
+    },
+    {
+      "case_id": "confirmation_outside_window_does_not_match",
+      "description": "Step 1 closes at 5M bar index 0 and the no-wick bar closes at 5M bar index 15, which is beyond the confirmation_window_bars budget of 12. The partial sequence expired at index 12 and the chain had already returned to IDLE, so the late bar matches nothing.",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "15M",
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 15,
+            "timeframe": "15M",
+            "candle.open": 2009.0,
+            "candle.high": 2018.5,
+            "candle.low": 2008.5,
+            "candle.close": 2018.0,
+            "atr": 8.0
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "IDLE",
+        "matched": false,
+        "trigger_confirmed": false,
+        "sequence_step_reached": 0
+      }
+    },
+    {
+      "case_id": "direction_disagreement_does_not_match",
+      "description": "Step 1 latches LONG from a lower-wick rejection. The 15M bar at index 3 is a down marubozu, so no_wick_candle emits SHORT against an inherited LONG. Direction disagreement is a non-match and a reset condition, not a re-direction.",
+      "given_hermes_facts": {
+        "bars": [
+          {
+            "bar_index_5m": 0,
+            "timeframe": "15M",
+            "candle.open": 2007.0,
+            "candle.high": 2010.0,
+            "candle.low": 2000.0,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          },
+          {
+            "bar_index_5m": 3,
+            "timeframe": "15M",
+            "candle.open": 2018.0,
+            "candle.high": 2018.5,
+            "candle.low": 2008.5,
+            "candle.close": 2009.0,
+            "atr": 8.0
+          }
+        ]
+      },
+      "given_parameters": {
+        "wick_to_range_ratio_min": 0.6,
+        "body_to_range_ratio_max": 0.35,
+        "opposing_wick_to_range_ratio_max": 0.25,
+        "wick_to_range_ratio_max": 0.1,
+        "body_to_range_ratio_min": 0.8,
+        "min_range_atr_multiple": 0.5,
+        "atr_period": 14,
+        "range_lookback": 12,
+        "break_margin_ratio": 0.1,
+        "confirmation_window_bars": 12,
+        "trigger_window_bars": 9
+      },
+      "expected_output": {
+        "state": "IDLE",
+        "matched": false,
+        "trigger_confirmed": false,
+        "sequence_step_reached": 0
+      }
+    }
+  ],
+  "evidence_requirements": {
+    "backtest_requirements": [
+      "XAUUSD 15M and 5M bars over at least 24 continuous months, bar-close evaluation only, no intrabar fills.",
+      "Report the matched population separately for trigger_confirmed true and trigger_confirmed false, so the optional step's contribution is measurable rather than assumed.",
+      "Report the count of sequences that reached WICK_SEEN but expired before step 2, so the confirmation_window_bars default can be evidenced rather than retained by default.",
+      "Sweep wick_to_range_ratio_min across its declared allowed_range and wick_to_range_ratio_max across its declared allowed_range, reporting the result surface rather than a single tuned point, because both defaults are PROVISIONAL_PENDING_EVIDENCE under docs/AMBIGUITY-POLICY.md.",
+      "Report out-of-sample results on a period held back from every sweep above."
+    ],
+    "forward_test_requirements": [
+      "At least 3 months of forward evaluation on unseen bars before any promotion, with the same split by trigger_confirmed."
+    ],
+    "minimum_sample_size": 200,
+    "required_cer_evidence_types": [
+      "SOURCE_ANALYSIS",
+      "STRATEGY_HYPOTHESIS",
+      "VERSION_LINEAGE",
+      "RESEARCH_FINDING",
+      "PROMOTION_EVIDENCE"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "criterion_id": "minimum_qualifying_sequences",
+      "statement": "At least 200 completed sequences occurred in the backtest window before any performance criterion is read at all.",
+      "metric": "completed_sequence_count",
+      "comparator": ">=",
+      "threshold": 200
+    },
+    {
+      "criterion_id": "out_of_sample_expectancy_positive",
+      "statement": "Expectancy per completed sequence is positive on the held-back out-of-sample period.",
+      "metric": "out_of_sample_expectancy_r",
+      "comparator": ">",
+      "threshold": 0
+    },
+    {
+      "criterion_id": "wick_ratio_default_evidenced",
+      "statement": "The promoted wick_to_range_ratio_min was selected from the declared sweep on evidence, so no PROVISIONAL_PENDING_EVIDENCE default reaches promotion unexamined.",
+      "metric": "wick_ratio_default_status",
+      "comparator": "==",
+      "threshold": "EVIDENCED"
+    },
+    {
+      "criterion_id": "no_wick_ratio_default_evidenced",
+      "statement": "The promoted wick_to_range_ratio_max was selected from the declared sweep on evidence.",
+      "metric": "no_wick_ratio_default_status",
+      "comparator": "==",
+      "threshold": "EVIDENCED"
+    },
+    {
+      "criterion_id": "optional_trigger_contribution_measured",
+      "statement": "The trigger_confirmed true and false populations were both reported, whatever they showed, so the optional step is retained or dropped on evidence.",
+      "metric": "optional_trigger_split_reported",
+      "comparator": "==",
+      "threshold": true
+    }
+  ],
+  "rejection_criteria": [
+    {
+      "criterion_id": "insufficient_sample",
+      "statement": "Fewer than 200 completed sequences occurred in the backtest window, so no performance claim can be made from it.",
+      "metric": "completed_sequence_count",
+      "comparator": "<",
+      "threshold": 200
+    },
+    {
+      "criterion_id": "out_of_sample_expectancy_negative",
+      "statement": "Expectancy per completed sequence is at or below zero out of sample.",
+      "metric": "out_of_sample_expectancy_r",
+      "comparator": "<=",
+      "threshold": 0
+    },
+    {
+      "criterion_id": "in_sample_only_edge",
+      "statement": "In-sample expectancy exceeds out-of-sample expectancy by more than 0.5R, which indicates the parameter sweep fitted the sample rather than the effect (PID line 198).",
+      "metric": "expectancy_r_in_sample_minus_out_of_sample",
+      "comparator": ">",
+      "threshold": 0.5
+    },
+    {
+      "criterion_id": "sequence_ordering_not_discriminating",
+      "statement": "The ordered sequence performs no better than the same two atomics evaluated with ALL and no ordering, so the SEQUENCE primitive is carrying nothing and the strategy is not the one described.",
+      "metric": "sequence_minus_unordered_expectancy_r",
+      "comparator": "<=",
+      "threshold": 0
+    }
+  ],
+  "provenance": {
+    "source_type": "TRADER_EXPLANATION",
+    "source_reference": "strategies/wick_rejection_sequence/0.1.0/source.txt",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "excerpt": "The setup starts when I get a large 15m rejection wick. [...] What I want next is a subsequent no-wick directional confirmation on the same 15m chart, running the other way to the wick. [...] Once those two are in, I will drop to the 5m chart and look for a range breakout to time the entry. That step is optional.",
+    "notes": "AMBIGUITY ATTRIBUTION. The source was put through `hsa intake --source-type TRADER_EXPLANATION` and produced a STRATEGY_INTAKE_DRAFT (exit 0), not a STRATEGY_NOT_SUFFICIENTLY_DEFINED refusal. Two discretionary terms were recognised and both were PARAMETERISED, neither guessed:\n\n  (1) term_id large_wick, source_language \"large 15m rejection wick\" at line 4 characters 31-54. disposition PARAMETERISED; authority HUMAN_ARCHITECT_RULING; ruling_document docs/AMBIGUITY-POLICY.md; lexicon_term large_wick; lexicon_version 1.0.0; hsa_guessed false; default_status PROVISIONAL_PENDING_EVIDENCE. Measurement basis: wick length as a fraction of the evaluated candle's total range, measured on that one bar. The intake draft declared it as parameter min_wick_to_range_ratio, default 0.6, allowed 0.3 to 0.9. It is carried in this package by the embedded rejection_wick 1.0.0 parameter wick_to_range_ratio_min, default 0.6, allowed 0.3 to 0.95 \u2014 the same ratified basis and the same default under the catalogue's parameter name.\n\n  (2) term_id no_wick_candle, source_language \"no-wick directional confirmation\" at line 9 characters 1-32. disposition PARAMETERISED; authority HUMAN_ARCHITECT_RULING; ruling_document docs/AMBIGUITY-POLICY.md; lexicon_term no_wick_candle; lexicon_version 1.0.0; hsa_guessed false; default_status PROVISIONAL_PENDING_EVIDENCE. Measurement basis: the larger of the two wicks as a fraction of the candle's total range, at or below a small cap. The intake draft declared it as parameter max_wick_to_range_ratio, default 0.1, allowed 0.0 to 0.25. It is carried here by the embedded no_wick_candle 1.0.0 parameter wick_to_range_ratio_max, default 0.1, allowed 0.0 to 0.3.\n\nBoth defaults remain PROVISIONAL_PENDING_EVIDENCE. What docs/AMBIGUITY-POLICY.md ratifies is the measurement basis, not the value; evidence_requirements above requires both to be swept and the acceptance criteria refuse promotion of an unexamined default.\n\nNOT PARAMETERISED BY HSA. The ordering of the three steps, the four-15M-bar confirmation budget, the three-15M-bar live window, bar-close-only evaluation and the optionality of the 5M trigger are all stated outright by the source and were transcribed, not inferred. The choice of range_breakout 1.0.0 as the 5M trigger is the source's own words 'look for a range breakout'.\n\nTIMEFRAME ROLES. LOCATION 15M, CONFIRMATION 15M, TRIGGER 5M. These are semantic roles, not universal timeframes (PID line 93): LOCATION and CONFIRMATION share 15M here because the source describes a same-timeframe pair, and the GOLD template's 4H/1H mapping is a different strategy's choice, not doctrine. No CONTEXT role is used, because the source states no higher-timeframe regime condition and inventing one would be HSA supplying trading logic the source never gave (PID line 39)."
+  },
+  "cer_references": [
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0001-source-analysis",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0001-source-analysis",
+      "reference_type": "SOURCE_ANALYSIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Analysis of the transcribed voice note at strategies/wick_rejection_sequence/0.1.0/source.txt: two discretionary terms recognised, both PARAMETERISED onto a ratified measurement basis per docs/AMBIGUITY-POLICY.md, none guessed, none left unruled.",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0002-hypothesis",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0002-hypothesis",
+      "reference_type": "STRATEGY_HYPOTHESIS",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Hypothesis anchor for candidate 0.1.0: that a 15M rejection of an extreme followed inside four 15M bars by a one-sided 15M bar in the rejection direction carries information the rejection alone does not. Stated, not shown: no run has been executed.",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    },
+    {
+      "$hsa_kind": "cer_reference",
+      "$hsa_contract_version": "1.0.0",
+      "strategy_id": "wick_rejection_sequence",
+      "strategy_version": "0.1.0",
+      "experiment_id": "FIXTURE-EXP-WICKSEQ-0001",
+      "evidence_id": "FIXTURE-EVD-WICKSEQ-0003-lineage",
+      "artifact_id": "FIXTURE-ART-WICKSEQ-0003-lineage",
+      "reference_type": "VERSION_LINEAGE",
+      "source": "CONTRACT_FIXTURE",
+      "summary": "Lineage anchor for wick_rejection_sequence 0.1.0. This is the original version and supersedes nothing, which the package states as lifecycle.supersedes null. Any later revision becomes a separately versioned candidate rather than an edit here (PID lines 185-189).",
+      "recorded_at_utc": "2026-09-04T00:00:00Z",
+      "supports": "INFORMATIONAL"
+    }
+  ],
+  "lifecycle": {
+    "status": "CANDIDATE",
+    "immutable_once_promoted": true,
+    "created_at_utc": "2026-09-04T00:00:00Z",
+    "supersedes": null
+  }
+}

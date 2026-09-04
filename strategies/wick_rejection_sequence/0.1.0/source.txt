@@ -1,0 +1,19 @@
+Voice note from a discretionary XAUUSD trader, transcribed verbatim.
+15m chart, London session.
+
+The setup starts when I get a large 15m rejection wick. Price runs out to a
+new extreme, gets thrown back, and the bar shuts with most of its range left
+behind as wick. That says to me the extreme was not accepted.
+
+I do not act on the wick on its own. What I want next is a subsequent
+no-wick directional confirmation on the same 15m chart, running the other
+way to the wick. The body has to carry the whole bar with nothing hanging
+off either end. If that second bar has not printed within four 15m bars of
+the wick, I bin the idea and wait for another wick.
+
+Once those two are in, I will drop to the 5m chart and look for a range
+breakout to time the entry. That step is optional. If the 5m never gives me
+one I still take the setup on the 15m pair alone.
+
+I only ever read this on bar close, never intrabar. The setup stays live for
+three 15m bars after the second bar prints, then it is stale and I leave it.
