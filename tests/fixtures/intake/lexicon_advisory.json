@@ -6,7 +6,9 @@
   "unknown_term_policy": {
     "disposition": "REFUSE",
     "severity": "ADVISORY",
-    "blocks": ["PARAMETER_DEFINITION"],
+    "blocks": [
+      "PARAMETER_DEFINITION"
+    ],
     "why_unresolved_template": "Test fixture: \"{phrase}\" is discretionary ({marker_reason}) and undeclared.",
     "resolution_needed": {
       "kind": "MEASURABLE_DEFINITION",
@@ -15,7 +17,11 @@
     }
   },
   "discretionary_markers": [
-    {"marker_id": "health", "reason": "a health judgement with no stated measure", "pattern": "\\b(?:healthy|unhealthy)\\b"}
+    {
+      "marker_id": "health",
+      "reason": "a health judgement with no stated measure",
+      "pattern": "\\b(?:healthy|unhealthy)\\b"
+    }
   ],
   "terms": [
     {
@@ -33,11 +39,32 @@
           "type": "number",
           "default": 0.6,
           "units": "ratio",
-          "allowed_range": {"minimum": 0.3, "maximum": 0.9}
+          "allowed_range": {
+            "minimum": 0.3,
+            "maximum": 0.9
+          }
         }
       ],
       "required_hermes_fields": [
-        {"field": "candle.range", "purpose": "Total range of the evaluated bar."}
+        {
+          "field": "candle.range",
+          "purpose": "Total range of the evaluated bar."
+        }
+      ],
+      "realised_by": [
+        {
+          "lexicon_parameter": "min_wick_to_range_ratio",
+          "catalogue_strategy_id": "rejection_wick",
+          "catalogue_strategy_version": "1.0.0",
+          "catalogue_parameter": "wick_to_range_ratio_min",
+          "basis_phrases": [
+            "wick",
+            "total bar range",
+            "minimum"
+          ],
+          "why_the_names_differ": "Fixture lexicon; mirrors the shipped lexicon's link so the loader's mandatory-realisation rule is exercised here too.",
+          "range_reconciliation": "Not applicable \u2014 this is an advisory test fixture, not a ruling."
+        }
       ]
     },
     {
@@ -48,7 +75,9 @@
       "pattern": "\\bnear[ -](?:the[ -])?resistance\\b",
       "measurement_basis": null,
       "why_unresolved": "Test fixture: the resistance level is never constructed.",
-      "blocks": ["ATOMIC_DECOMPOSITION"],
+      "blocks": [
+        "ATOMIC_DECOMPOSITION"
+      ],
       "severity": "ADVISORY",
       "resolution_needed": {
         "kind": "HUMAN_DECISION",

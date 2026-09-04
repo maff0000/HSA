@@ -285,3 +285,27 @@ references = reader.references_for("gold_context_breakout", "1.0.0")
 * `contracts/fixtures/README.md` — what the fixture set is and is not.
 * `docs/VERSIONING.md` — why every reference is anchored to one immutable
   version, and what a candidate may and may not inherit.
+
+## 8. The inventory evidence container
+
+A governed strategy version carries its CER references in an evidence
+container at `strategies/<id>/<version>/evidence.json`: a plain object holding
+a `references` array of full `cer_reference` documents, plus index metadata
+describing the set as a whole.
+
+The container is deliberately **not** a contract kind — it declares no
+`$hsa_kind`, and nothing in `contracts/` validates it as a document. That is
+how the two shapes are told apart: a `cer_reference` declares its kind, a
+container does not. Detection never depends on the filename.
+
+```bash
+hsa cer validate strategies/gold_context_breakout/1.0.0/evidence.json
+```
+
+reports each reference by index (`$.references[2]`) and each failure by field,
+so an invalid entry names both which reference and which property failed.
+
+Evidence is anchored to a strategy version, so a version's references belong
+together with the metadata describing what evidence is still owed before
+promotion. Nothing here is a store: the container is read, validated and
+discarded, exactly as the fixtures are (§5).

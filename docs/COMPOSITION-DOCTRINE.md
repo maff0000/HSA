@@ -122,6 +122,10 @@ after the one before, and the whole ordered set must complete inside
 
 ### `CONTEXT_TRIGGER`
 
+A `CONTEXT_TRIGGER` chain carries exactly two inputs' worth of roles: one
+CONTEXT and one TRIGGER. A third role, or a second of either, is rejected —
+the primitive defines no rule for how it would combine.
+
 A higher-timeframe `CONTEXT` input must be **holding** at the moment a
 lower-timeframe `TRIGGER` input **fires**.
 
@@ -306,7 +310,8 @@ hatch — and not something to route around in a document.
 | Identity is id + version, both required | `chain.schema.json` |
 | Reason on match and non-match, per input | `chain.schema.json` (`const: true`) |
 | `SEQUENCE` has a window and per-input indices | `chain.schema.json` (conditional) |
-| `CONTEXT_TRIGGER` has both roles present | `chain.schema.json` (conditional) |
+| `CONTEXT_TRIGGER` has *at least* one CONTEXT and one TRIGGER | `chain.schema.json` (conditional) |
+| `CONTEXT_TRIGGER` has *at most* one of each, and no other role | `hsa/semantics.py` |
 | `input_id` unique within a chain | `hsa/semantics.py` |
 | `sequence_index` contiguous from 1, no duplicates | `hsa/semantics.py` |
 | `sequence_index` absent on a non-`SEQUENCE` chain | `hsa/semantics.py` |
@@ -318,15 +323,38 @@ hatch — and not something to route around in a document.
 | Package embeds every atomic its chain names | `hsa/semantics.py` |
 | Atomic HERMES needs carried up to package level | `hsa/semantics.py` |
 
-Run both halves over a document with:
+Note the first two `CONTEXT_TRIGGER` rows. "Exactly one CONTEXT and exactly one
+TRIGGER" is enforced by the two layers jointly: the schema's `contains` requires
+each role to be present, and `hsa/semantics.py` rejects a second one and rejects
+any third role. Neither layer states the rule alone.
+
+### Running both halves
 
 ```bash
-hsa chain path/to/chain.json
+hsa validate path/to/document.json
 ```
 
-Structural validation runs first, semantic second. A document that passes
-`hsa validate` can still fail `hsa chain`; that difference is the whole reason
-`hsa/semantics.py` exists.
+Structural validation runs first, semantic second, and **both run by default**
+— for a `chain` and for a `strategy_package` alike. There is no mode of
+`hsa validate` that silently checks half a document.
+
+`--structural-only` asks the narrower question of schema conformance and says
+on its success line that the semantic half did not run. `--no-catalogue` runs
+the checks that do not need the atomic catalogue and names, on stderr, the
+check that therefore did not run. If the catalogue is required but cannot be
+loaded, the command fails (exit 3) rather than passing a document it did not
+finish checking. **A check that could not run is never reported as a check
+that passed.**
+
+`hsa chain` remains the command that *explains* a composition, and it accepts
+either a `chain` document or a `strategy_package` — real chains live embedded
+inside packages, so refusing a package meant the only chains that actually
+exist could not be inspected without cutting them out to a temporary file by
+hand. On a package it runs the chain checks and says on stderr which
+package-level checks it left to `hsa validate`.
+
+Semantic failure exits 1 — the same "read but failed validation" code as a
+schema failure — and reports in the same `path: message` form.
 
 ---
 

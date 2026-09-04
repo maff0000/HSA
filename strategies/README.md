@@ -139,6 +139,7 @@ specialists over one strategy stretched to cover everything.
 | Strategy | Version | Status | Primitive | Roles | What it is |
 | -------- | ------- | ------ | --------- | ----- | ---------- |
 | [`gold_context_breakout`](gold_context_breakout/1.0.0/) | `1.0.0` | `CANDIDATE` | `CONTEXT_TRIGGER` | CONTEXT→4H, TRIGGER→5M | **PID acceptance Example A** (`PID.md:234-236`): a 4H moving-average cross context gating a 5M range breakout on XAUUSD. |
+| [`wick_rejection_sequence`](wick_rejection_sequence/0.1.0/) | `0.1.0` | `CANDIDATE` | `SEQUENCE` | LOCATION→15M, CONFIRMATION→15M, TRIGGER→5M | **PID acceptance Example B** (`PID.md:238-242`): a large 15m rejection wick, then a no-wick directional confirmation, then an optional 5M trigger. |
 
 **These are product proofs, not claims of profitable strategies**
 (`PID.md:244`). No package in this inventory has passed a real evidence gate,
@@ -154,26 +155,20 @@ are declared, bounded and revisable under evidence.
 python3 -m hsa.cli validate strategies/<id>/<version>/package.json
 ```
 
-That is the **structural** half only — `hsa validate` checks the document
-against its frozen schema and stops there.
+Both halves run by default. `hsa validate` checks the document against its
+frozen schema **and** applies the cross-field semantic rules JSON Schema cannot
+express: that the package and its embedded chain say the same thing, that a
+`CONTEXT` input genuinely sits above its `TRIGGER`, that every atomic the chain
+names resolves in the catalogue at the exact version pinned, and that
+package-level HERMES fields cover what the atomics consume.
 
-The **semantic** half is the cross-field rules JSON Schema cannot express: that
-the package and its embedded chain say the same thing, that a `CONTEXT` input
-genuinely sits above its `TRIGGER`, that every atomic the chain names resolves
-in the catalogue at the exact version pinned, and that package-level HERMES
-fields cover what the atomics consume. As of this writing **no CLI command
-runs those checks over a `strategy_package`** — `hsa chain` runs them, but it
-accepts a `chain` document and rejects any other kind. Until a command covers
-it, the semantic half runs from Python:
+`--structural-only` asks the narrower schema question and says on its success
+line that the semantic half did not run. If the catalogue is needed but cannot
+be loaded, the command fails rather than passing a document it did not finish
+checking: a check that could not run is never reported as a check that passed.
 
-```python
-import json
-from hsa.semantics import Catalogue, check_package
-
-package = json.load(open("strategies/<id>/<version>/package.json"))
-findings = check_package(package, catalogue=Catalogue.from_directory())
-assert findings == []
-```
+`hsa chain <package>` explains the composition and validates the embedded
+chain, naming on stderr the package-level checks it leaves to `hsa validate`.
 
 `tests/test_acceptance_example_a.py` runs both halves over Example A on every
 test run, so a package that drifts from its catalogue entries fails the suite.

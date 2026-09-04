@@ -374,6 +374,15 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
                     % (where, i, name)
                 )
             linked.append(name)
+        if disposition == PARAMETERISE and parameter_names and not raw_links:
+            raise LexiconError(
+                "%s: a PARAMETERISE term declaring parameters must declare "
+                "realised_by linking each one to the catalogue parameter that "
+                "implements it. Without the link nothing checks that the ruled "
+                "number is the number the catalogue runs, which is the silent "
+                "guess PID line 39 forbids wearing a ratified parameter's "
+                "paperwork." % where
+            )
         realised_by = tuple(raw_links)
         raw_relationship = raw.get("hermes_basis_relationship")
         if raw_relationship is not None:

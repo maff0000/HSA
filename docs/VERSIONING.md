@@ -173,8 +173,13 @@ for callers that want to inspect rather than enforce.
 ## 5. Lineage
 
 `lineage(packages)` orders one strategy's packages by semver, oldest first,
-and reports each version's status, what it supersedes and why (real output,
-evidence summaries abbreviated here for width):
+and reports each version's status, what it supersedes and why.
+
+> **Illustrative shape, not the inventory.** The sample below shows what a
+> two-version lineage looks like once one exists. It is NOT a statement about
+> `strategies/`: no package in this repository is `PROMOTED`, no 1.1.0 exists,
+> and no promotion gate has been evaluated because CER is not live. See
+> `strategies/README.md` for why the inventory holds a single version.
 
 ```bash
 hsa cer lineage strategies/gold-1.0.0.json strategies/gold-1.1.0.json
