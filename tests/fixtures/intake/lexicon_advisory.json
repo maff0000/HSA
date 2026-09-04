@@ -1,0 +1,60 @@
+{
+  "lexicon_version": "0.0.1-test",
+  "ruling_document": "docs/AMBIGUITY-POLICY.md",
+  "ratified_by": "TEST_FIXTURE_ONLY",
+  "description": "Test-only lexicon. Identical in shape to the shipped lexicon, but every refusal is ADVISORY rather than BLOCKING, which exercises the path where unresolved language travels WITH a draft instead of stopping it. Not a ruling on any term; see docs/AMBIGUITY-POLICY.md for the real rulings.",
+  "unknown_term_policy": {
+    "disposition": "REFUSE",
+    "severity": "ADVISORY",
+    "blocks": ["PARAMETER_DEFINITION"],
+    "why_unresolved_template": "Test fixture: \"{phrase}\" is discretionary ({marker_reason}) and undeclared.",
+    "resolution_needed": {
+      "kind": "MEASURABLE_DEFINITION",
+      "description_template": "Test fixture: state what \"{phrase}\" measures.",
+      "responsible": "MATT"
+    }
+  },
+  "discretionary_markers": [
+    {"marker_id": "health", "reason": "a health judgement with no stated measure", "pattern": "\\b(?:healthy|unhealthy)\\b"}
+  ],
+  "terms": [
+    {
+      "term_id": "large_wick",
+      "label": "large wick",
+      "disposition": "PARAMETERISE",
+      "pid_reference": "PID line 114",
+      "pattern": "\\b(?:large|big)(?:[ -][a-z0-9.%]+){0,3}[ -]wicks?\\b",
+      "measurement_basis": "Wick length as a fraction of the evaluated candle's total range.",
+      "basis_rationale": "Test fixture mirroring the shipped ruling.",
+      "parameters": [
+        {
+          "name": "min_wick_to_range_ratio",
+          "description": "Test fixture parameter.",
+          "type": "number",
+          "default": 0.6,
+          "units": "ratio",
+          "allowed_range": {"minimum": 0.3, "maximum": 0.9}
+        }
+      ],
+      "required_hermes_fields": [
+        {"field": "candle.range", "purpose": "Total range of the evaluated bar."}
+      ]
+    },
+    {
+      "term_id": "near_resistance",
+      "label": "near resistance",
+      "disposition": "REFUSE",
+      "pid_reference": "PID line 115",
+      "pattern": "\\bnear[ -](?:the[ -])?resistance\\b",
+      "measurement_basis": null,
+      "why_unresolved": "Test fixture: the resistance level is never constructed.",
+      "blocks": ["ATOMIC_DECOMPOSITION"],
+      "severity": "ADVISORY",
+      "resolution_needed": {
+        "kind": "HUMAN_DECISION",
+        "description": "Test fixture: decide how resistance is constructed.",
+        "responsible": "MATT"
+      }
+    }
+  ]
+}

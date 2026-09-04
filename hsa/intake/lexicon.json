@@ -1,0 +1,227 @@
+{
+  "lexicon_version": "1.0.0",
+  "ruling_document": "docs/AMBIGUITY-POLICY.md",
+  "ratified_by": "HSA_ARCHITECT_RULING",
+  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.",
+
+  "unknown_term_policy": {
+    "disposition": "REFUSE",
+    "severity": "BLOCKING",
+    "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION"],
+    "why_unresolved_template": "The phrase \"{phrase}\" is discretionary language ({marker_reason}) that has no entry in HSA's declared intake lexicon (hsa/intake/lexicon.json). HSA therefore has no ratified measurement basis for it and cannot establish one without inventing trading semantics the source never stated. Unknown discretionary terms fail closed by policy rather than passing through unflagged, because an unflagged term becomes an assumption baked into a governed strategy (PID line 39; docs/AMBIGUITY-POLICY.md, 'Unknown terms fail closed').",
+    "resolution_needed": {
+      "kind": "MEASURABLE_DEFINITION",
+      "description_template": "State what \"{phrase}\" measures: the quantity to compute and the HERMES facts to compute it from. If a settled measurement basis exists, add it to hsa/intake/lexicon.json with a ruling under docs/AMBIGUITY-POLICY.md so future intakes resolve it consistently.",
+      "responsible": "MATT"
+    }
+  },
+
+  "discretionary_markers": [
+    {"marker_id": "magnitude", "reason": "an unquantified size adjective", "pattern": "\\b(?:large|larger|big|bigger|huge|sizeable|sizable|massive)\\b"},
+    {"marker_id": "strength", "reason": "an unquantified strength adjective", "pattern": "\\b(?:strong|stronger|strongly|weak|weaker|weakly|powerful)\\b"},
+    {"marker_id": "quality", "reason": "a quality judgement with no stated measure", "pattern": "\\b(?:good|better|best|decent|nice|solid|quality|proper|properly)\\b"},
+    {"marker_id": "clarity", "reason": "a clarity judgement with no stated measure", "pattern": "\\b(?:clean|cleanly|clear|clearly|obvious|obviously|textbook)\\b"},
+    {"marker_id": "health", "reason": "a health judgement with no stated measure", "pattern": "\\b(?:healthy|unhealthy)\\b"},
+    {"marker_id": "proximity", "reason": "a proximity claim with no stated tolerance", "pattern": "\\b(?:near|nearby|close to|approaching|just above|just below)\\b"},
+    {"marker_id": "approximation", "reason": "an approximation with no stated tolerance", "pattern": "\\b(?:around|roughly|approximately|about|circa|or so|a bit|somewhat)\\b"},
+    {"marker_id": "significance", "reason": "a significance claim with no stated threshold", "pattern": "\\b(?:significant|significantly|substantial|substantially|meaningful|notable)\\b"},
+    {"marker_id": "sharpness", "reason": "an unquantified rate-of-change adjective", "pattern": "\\b(?:aggressive|aggressively|sharp|sharply|sudden|suddenly|violent|violently)\\b"},
+    {"marker_id": "extension", "reason": "an unquantified extension claim", "pattern": "\\b(?:extended|overextended|stretched|exhausted|overbought|oversold)\\b"},
+    {"marker_id": "geometry", "reason": "an unquantified relative-size adjective", "pattern": "\\b(?:deep|deeper|deeply|shallow|tight|tighter|tightly|wide|wider|narrow)\\b"},
+    {"marker_id": "speed", "reason": "an unquantified speed adjective", "pattern": "\\b(?:quick|quickly|fast|rapid|rapidly|slow|slowly)\\b"},
+    {"marker_id": "sufficiency", "reason": "a sufficiency claim with no stated threshold", "pattern": "\\b(?:enough|sufficient|sufficiently|plenty of|ample)\\b"},
+    {"marker_id": "vague_quantity", "reason": "an unquantified count", "pattern": "\\b(?:a few|several|lots of|a couple of|multiple)\\b"},
+    {"marker_id": "hedge", "reason": "a hedged rule that never states when it applies", "pattern": "\\b(?:ideally|preferably|usually|typically|often|generally|normally|sometimes|tends to)\\b"},
+    {"marker_id": "importance", "reason": "an importance claim with no stated construction", "pattern": "\\b(?:important|importantly|key|crucial|critical|major)\\b"}
+  ],
+
+  "terms": [
+    {
+      "term_id": "large_wick",
+      "label": "large wick",
+      "disposition": "PARAMETERISE",
+      "pid_reference": "PID line 114; required by acceptance Example B, PID line 242",
+      "pattern": "\\b(?:large|larger|big|bigger|huge|long|sizeable|sizable|significant|substantial)(?:[ -][a-z0-9.%]+){0,3}[ -]wicks?\\b",
+      "measurement_basis": "Wick length as a fraction of the evaluated candle's total range (high minus low), measured on that one bar.",
+      "basis_rationale": "Both quantities are unambiguous single-bar HERMES facts. No level must be constructed, no lookback chosen, and no competing construction of 'wick' exists that would rank real bars differently. Only the cut-off is missing, and a cut-off is a bounded parameter (PID line 140), not a trading decision.",
+      "parameters": [
+        {
+          "name": "min_wick_to_range_ratio",
+          "description": "Minimum ratio of wick length to total candle range for the wick to count as large. Resolves the discretionary phrase 'large wick' onto its ratified measurement basis; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
+          "type": "number",
+          "default": 0.6,
+          "units": "ratio",
+          "allowed_range": {"minimum": 0.3, "maximum": 0.9, "step": 0.05}
+        }
+      ],
+      "required_hermes_fields": [
+        {"field": "candle.wick_upper", "purpose": "Upper wick length of the evaluated bar: high minus the greater of open and close."},
+        {"field": "candle.wick_lower", "purpose": "Lower wick length of the evaluated bar: the lesser of open and close, minus low."},
+        {"field": "candle.range", "purpose": "Total range of the evaluated bar: high minus low. Denominator of the wick ratio."}
+      ]
+    },
+    {
+      "term_id": "no_wick_candle",
+      "label": "no-wick candle",
+      "disposition": "PARAMETERISE",
+      "pid_reference": "PID line 55 names no-wick candle as an atomic example; required by acceptance Example B, PID line 242",
+      "pattern": "\\bno[ -]wicks?(?:[ -][a-z0-9.%]+){0,3}[ -](?:candles?|bars?|confirmations?|closes?|bodies|body)\\b|\\bno[ -]wicks?\\b",
+      "measurement_basis": "The larger of the two wicks as a fraction of the evaluated candle's total range, required to be at or below a small cap, measured on that one bar.",
+      "basis_rationale": "The same single-bar basis as large_wick, read in the opposite direction. 'No wick' cannot mean exactly zero on real data, so a tolerance is unavoidable; that tolerance is a bounded parameter rather than a choice between constructions.",
+      "parameters": [
+        {
+          "name": "max_wick_to_range_ratio",
+          "description": "Maximum ratio of the larger wick to total candle range for the candle to count as no-wick. Resolves the discretionary tolerance in 'no-wick'; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
+          "type": "number",
+          "default": 0.1,
+          "units": "ratio",
+          "allowed_range": {"minimum": 0.0, "maximum": 0.25, "step": 0.01}
+        }
+      ],
+      "required_hermes_fields": [
+        {"field": "candle.wick_upper", "purpose": "Upper wick length of the evaluated bar: high minus the greater of open and close."},
+        {"field": "candle.wick_lower", "purpose": "Lower wick length of the evaluated bar: the lesser of open and close, minus low."},
+        {"field": "candle.range", "purpose": "Total range of the evaluated bar: high minus low. Denominator of the wick ratio."}
+      ]
+    },
+    {
+      "term_id": "near_resistance",
+      "label": "near resistance",
+      "disposition": "REFUSE",
+      "pid_reference": "PID line 115",
+      "pattern": "\\b(?:near|nearby|close to|approaching|into|at|just above|just below)(?:[ -](?:the|a|an|key|major|nearby|next|prior|previous))*[ -](?:resistance|support|supply|demand)(?:[ -](?:levels?|zones?|areas?|lines?|bands?))?\\b",
+      "measurement_basis": null,
+      "why_unresolved": "Two separate things are missing and neither is a threshold. First, resistance is never constructed: the source does not say which swing, over what lookback, on which timeframe, nor whether it is a single price or a zone. Second, 'near' has no reference to be near to until the first is settled, so no tolerance can even be expressed. Swing detection, pivot construction, prior-day levels and volume-profile nodes are materially different constructions that disagree on real data, and choosing between them would be HSA inventing trading semantics the source never stated.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "HERMES_MAPPING"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "HUMAN_DECISION",
+        "description": "Decide how the resistance level is constructed — the detection method, the lookback, the timeframe, and whether it is a price or a band — and only then the tolerance that counts as 'near'. Both are needed; the tolerance alone is not sufficient.",
+        "responsible": "MATT"
+      },
+      "candidate_definitions": [
+        {
+          "label": "Swing high over a fixed lookback, with a tolerance in ATR",
+          "measurable_definition": "Resistance is the highest high over a parameterised lookback of N bars on a stated timeframe. Price is near it when the distance from the current close to that level is at most a parameterised multiple of ATR.",
+          "required_hermes_fields": [
+            {"field": "structure.swing_high", "purpose": "Candidate resistance level from swing detection over the stated lookback."},
+            {"field": "volatility.atr", "purpose": "Scale for the proximity tolerance, so the tolerance is instrument- and regime-relative."},
+            {"field": "candle.close", "purpose": "Current price used to measure distance to the level."}
+          ]
+        },
+        {
+          "label": "Prior-session high, with a tolerance in price units",
+          "measurable_definition": "Resistance is the prior session's high on a stated timeframe. Price is near it when the distance from the current close is at most a parameterised number of price units.",
+          "required_hermes_fields": [
+            {"field": "session.prior_high", "purpose": "Candidate resistance level taken from the previous session."},
+            {"field": "candle.close", "purpose": "Current price used to measure distance to the level."}
+          ]
+        }
+      ]
+    },
+    {
+      "term_id": "strong_trend",
+      "label": "strong trend",
+      "disposition": "REFUSE",
+      "pid_reference": "PID line 116",
+      "pattern": "\\b(?:strong|stronger|strongly|weak|weaker|weakly|solid|healthy|powerful|clear|good)(?:[ -][a-z0-9.%]+){0,2}[ -](?:trends?|trending|uptrends?|downtrends?|momentum|bias)\\b",
+      "measurement_basis": null,
+      "why_unresolved": "'Trend strength' names no quantity. ADX, moving-average separation, the slope of a regression over a lookback, the count of consecutive higher highs, and net displacement over a window are all defensible readings of the same phrase, and they disagree on real data — they can rank the same two charts in opposite orders. The missing input is therefore the construction itself, not a threshold on an agreed construction. Once a construction is chosen, its cut-off becomes an ordinary bounded parameter.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "HERMES_MAPPING"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description": "State which construction of trend strength applies, and on which timeframe: the indicator or computation, its lookback, and the direction rule. The threshold can follow once the construction is fixed.",
+        "responsible": "MATT"
+      },
+      "candidate_definitions": [
+        {
+          "label": "ADX above a threshold",
+          "measurable_definition": "Trend is strong when ADX over a parameterised period on a stated timeframe is at or above a parameterised threshold.",
+          "required_hermes_fields": [
+            {"field": "indicator.adx", "purpose": "Directional-movement trend-strength reading over the stated period."}
+          ]
+        },
+        {
+          "label": "Moving-average separation and ordering",
+          "measurable_definition": "Trend is strong when the fast and slow moving averages are correctly ordered for the direction and their separation, normalised by ATR, is at or above a parameterised threshold.",
+          "required_hermes_fields": [
+            {"field": "indicator.ma_fast", "purpose": "Fast moving average over the stated period."},
+            {"field": "indicator.ma_slow", "purpose": "Slow moving average over the stated period."},
+            {"field": "volatility.atr", "purpose": "Normaliser so separation is comparable across instruments and regimes."}
+          ]
+        }
+      ]
+    },
+    {
+      "term_id": "confirmation_candle",
+      "label": "confirmation candle",
+      "disposition": "REFUSE",
+      "pid_reference": "PID line 117",
+      "pattern": "\\b(?:confirmation|confirming|confirm|confirmed)[ -](?:candles?|bars?|closes?|prints?)\\b",
+      "measurement_basis": null,
+      "why_unresolved": "Nothing in the phrase says what the candle must do, or what it confirms. Engulfing the prior bar, closing beyond a prior extreme, closing in the top third of its own range, or simply being a second bar in the same direction are all called confirmation candles by working traders, and they are different mechanical tests rather than different settings of one test. The pattern itself is the missing definition, so there is no quantity to threshold.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "DIRECTION_SEMANTICS"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description": "State the candle pattern that constitutes confirmation, what it is confirming, and on which timeframe it is evaluated. Note that a phrase which names the pattern — for example 'no-wick directional confirmation' — does resolve; 'confirmation candle' alone does not.",
+        "responsible": "SOURCE_AUTHOR"
+      },
+      "candidate_definitions": [
+        {
+          "label": "Close beyond the prior bar's extreme",
+          "measurable_definition": "The evaluated bar closes beyond the prior bar's high for LONG, or below its low for SHORT, on the stated timeframe.",
+          "required_hermes_fields": [
+            {"field": "candle.close", "purpose": "Close of the evaluated bar."},
+            {"field": "candle.prior_high", "purpose": "High of the immediately preceding bar."},
+            {"field": "candle.prior_low", "purpose": "Low of the immediately preceding bar."}
+          ]
+        },
+        {
+          "label": "Bullish or bearish engulfing",
+          "measurable_definition": "The evaluated bar's body fully engulfs the prior bar's body and closes in the trade direction.",
+          "required_hermes_fields": [
+            {"field": "candle.body", "purpose": "Body size and direction of the evaluated bar."},
+            {"field": "candle.prior_body", "purpose": "Body size and direction of the immediately preceding bar."}
+          ]
+        }
+      ]
+    },
+    {
+      "term_id": "good_breakout",
+      "label": "good breakout",
+      "disposition": "REFUSE",
+      "pid_reference": "PID line 118",
+      "pattern": "\\b(?:good|clean|proper|decent|nice|quality|valid|real|true|strong|convincing|textbook)(?:[ -][a-z0-9.%]+){0,2}[ -](?:breakouts?|break[ -]outs?|breaks?|breakdowns?)\\b",
+      "measurement_basis": null,
+      "why_unresolved": "The qualifier does not attach to any stated quantity. It could mean closing beyond the level rather than wicking through it, expansion in volume, follow-through on the next bar, or the absence of an immediate return inside the range. Those are different mechanical tests, not different settings of one test, so no single parameter can carry the meaning. The level being broken is frequently undefined as well.",
+      "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "TIMING_SEMANTICS"],
+      "severity": "BLOCKING",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description": "State what distinguishes a qualifying breakout from a non-qualifying one: the level being broken and how it is constructed, whether a close beyond it is required, and any follow-through or volume condition, each with the bar count over which it is measured.",
+        "responsible": "MATT"
+      },
+      "candidate_definitions": [
+        {
+          "label": "Close beyond the level, with follow-through",
+          "measurable_definition": "The bar closes beyond a stated level, and the next N bars do not close back inside it, where N is a parameterised bar count on the stated timeframe.",
+          "required_hermes_fields": [
+            {"field": "candle.close", "purpose": "Close used to test both the break and the follow-through."},
+            {"field": "structure.level", "purpose": "The level being broken, constructed by a stated method."}
+          ]
+        },
+        {
+          "label": "Close beyond the level, with volume expansion",
+          "measurable_definition": "The bar closes beyond a stated level and its volume is at least a parameterised multiple of the mean volume over a parameterised lookback.",
+          "required_hermes_fields": [
+            {"field": "candle.close", "purpose": "Close used to test the break."},
+            {"field": "volume.bar_volume", "purpose": "Volume of the breaking bar."},
+            {"field": "volume.mean_lookback", "purpose": "Mean volume over the stated lookback, as the comparison base."}
+          ]
+        }
+      ]
+    }
+  ]
+}

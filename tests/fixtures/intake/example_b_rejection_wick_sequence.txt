@@ -1,0 +1,9 @@
+Strategy sketch dictated on a call. XAUUSD, London hours, 15m chart.
+
+First I want to see a large 15m rejection wick against the prior move.
+
+Then the very next thing has to be a subsequent no-wick directional
+confirmation in the opposite direction, on the same 15m timeframe.
+
+After that there is an optional lower-timeframe 5m trigger, but I will take
+the setup without it.

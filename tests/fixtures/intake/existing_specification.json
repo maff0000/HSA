@@ -1,0 +1,9 @@
+{
+  "intake_id": "intake_legacy_wick_reversal",
+  "source_type": "EXISTING_SPECIFICATION",
+  "source_reference": "HELIOS legacy spec sheet v0.3, section 2",
+  "title": "15m wick-rejection reversal, restated from a legacy spec sheet",
+  "notes": "Restated during migration. The legacy sheet carried no thresholds of its own.",
+  "excerpt": "Signal fires on a large 15m rejection wick.",
+  "text": "Signal fires on a large 15m rejection wick, followed by a bar that closes beyond the opposite extreme of that bar. Evaluate on 15m bar close. Direction is SHORT after an upper wick and LONG after a lower wick."
+}

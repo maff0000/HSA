@@ -1,0 +1,6 @@
+Trader explanation, transcript excerpt.
+
+Timeframe is 1H for location and 15m for entry.
+
+I short when price gets near resistance and then prints a large 15m
+rejection wick. The second bar has to close back below the level.
