@@ -1,0 +1,171 @@
+{
+  "manifest_version": "1",
+  "title": "HSA boot manifest",
+  "description": "The single machine-readable declaration of what an HSA boot must load. PID.md lines 202-218 require HSA to be explicitly bootable, its durable authority to live in Git rather than chat memory, and the boot path to be documented and repeatable. Every artifact listed here is one of those durable authorities. `hsa boot` reads this file, verifies and loads each entry, and exits non-zero when any required entry is missing, unreadable or empty.",
+  "paths_relative_to": "repository root (the parent of the docs/ directory holding this manifest, unless --root is given)",
+  "entry_fields": {
+    "id": "stable identifier, unique within this manifest",
+    "title": "human name of the artifact",
+    "path": "repository-relative path; a directory path ends in /",
+    "type": "file | directory",
+    "required": "true if a boot without it is not a boot; false only where the PID genuinely allows absence",
+    "text": "optional, default true; false means do not decode the file as UTF-8 text",
+    "expect_glob": "directory entries only; glob the directory must match at least min_matches times",
+    "min_matches": "directory entries only; default 0",
+    "pid": "the PID.md line(s) that put this artifact in the boot set",
+    "why": "why boot fails, or warns, without it"
+  },
+  "reading_order_note": "Entries are listed in the order a fresh HSA session should read them: who HSA is, then the doctrine it enforces, then the contracts it must emit against, then the catalogue and policies it applies, then the evidence semantics, then the current inventory.",
+  "artifacts": [
+    {
+      "id": "hsa-role",
+      "title": "HSA role and operating doctrine",
+      "path": "docs/HSA-ROLE.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:210 (boot must load HSA role/operating doctrine); PID.md:13-39 (authority and boundaries)",
+      "why": "Without it a booted session does not know what HSA owns, what it must never do, or how it behaves when asked to engineer a strategy."
+    },
+    {
+      "id": "strategy-blueprint",
+      "title": "HELIOS Strategy Blueprint",
+      "path": "docs/HELIOS-STRATEGY-BLUEPRINT.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:9 (HSA must boot with and enforce the Blueprint every time); PID.md:211",
+      "why": "The Blueprint is the doctrine HSA enforces. Booting without it is the exact failure mode HSA exists to prevent (PID.md:7)."
+    },
+    {
+      "id": "boot-path",
+      "title": "Documented boot path",
+      "path": "docs/BOOT.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:218 (the boot path must be documented and repeatable)",
+      "why": "The repeatable procedure itself is a durable artifact; if it is missing the boot is not reproducible."
+    },
+    {
+      "id": "contracts-readme",
+      "title": "Contract set overview and invariants",
+      "path": "contracts/README.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212 (strategy contract/schema)",
+      "why": "States the structural prohibitions and invariants that the schemas enforce, so a booted session reads the contracts correctly."
+    },
+    {
+      "id": "contract-common-defs",
+      "title": "Shared contract definitions",
+      "path": "contracts/common.defs.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212",
+      "why": "Every other schema $refs it; without it no contract resolves."
+    },
+    {
+      "id": "contract-atomic-strategy",
+      "title": "Atomic strategy contract",
+      "path": "contracts/atomic_strategy.schema.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212; PID.md:43-55",
+      "why": "The shape every atomic decomposition must produce."
+    },
+    {
+      "id": "contract-chain",
+      "title": "Chain (composition) contract",
+      "path": "contracts/chain.schema.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212; PID.md:57-82",
+      "why": "The shape every chain specification must produce."
+    },
+    {
+      "id": "contract-strategy-package",
+      "title": "Strategy package contract",
+      "path": "contracts/strategy_package.schema.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212; PID.md:122-148",
+      "why": "The governed deliverable FORGE implements. It is the output HSA is accountable for."
+    },
+    {
+      "id": "contract-cer-reference",
+      "title": "CER reference contract",
+      "path": "contracts/cer_reference.schema.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212; PID.md:160-181",
+      "why": "Carries the CER canonical identities HSA must use rather than invent."
+    },
+    {
+      "id": "contract-not-sufficiently-defined",
+      "title": "STRATEGY_NOT_SUFFICIENTLY_DEFINED contract",
+      "path": "contracts/not_sufficiently_defined.schema.json",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:212; PID.md:120",
+      "why": "The structured refusal HSA must be able to return instead of guessing (PID.md:39)."
+    },
+    {
+      "id": "composition-doctrine",
+      "title": "Composition and chaining doctrine",
+      "path": "docs/COMPOSITION-DOCTRINE.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:214 (boot must load composition doctrine); PID.md:57-82",
+      "why": "How atomic outputs are combined, and the limits on chaining, are doctrine a booted session must hold before specifying a chain."
+    },
+    {
+      "id": "atomic-catalogue",
+      "title": "Atomic strategy catalogue",
+      "path": "catalogue/atomic/",
+      "type": "directory",
+      "required": true,
+      "expect_glob": "*",
+      "min_matches": 1,
+      "pid": "PID.md:213 (boot must load the atomic-strategy catalogue); PID.md:55",
+      "why": "A booted session decomposes into catalogued atomic strategies rather than reinventing them each session. An empty catalogue directory is treated as a missing catalogue."
+    },
+    {
+      "id": "ambiguity-policy",
+      "title": "Ambiguity handling policy",
+      "path": "docs/AMBIGUITY-POLICY.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:99-120 (intake and ambiguity handling); PID.md:39 (HSA must not guess ambiguous trading rules); PID.md:252 (a fresh boot must identify ambiguity rather than guessing)",
+      "why": "Not named as its own bullet in the PID.md:208-216 boot list, but PID.md:252 requires a FRESH BOOT to identify ambiguity rather than guess. That behaviour cannot be loaded from doctrine that boot does not load, so this manifest treats it as required."
+    },
+    {
+      "id": "cer-contract",
+      "title": "CER contract and evidence semantics",
+      "path": "docs/CER-CONTRACT.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:215 (boot must load the CER contract); PID.md:160-181",
+      "why": "HSA must use CER canonical identities and evidence semantics and must not bypass CER (PID.md:37, 162)."
+    },
+    {
+      "id": "cer-fixtures",
+      "title": "CER contract fixtures",
+      "path": "contracts/fixtures/cer/",
+      "type": "directory",
+      "required": false,
+      "expect_glob": "*",
+      "min_matches": 0,
+      "pid": "PID.md:181 (if CER is not yet live, HSA may use contract fixtures/mocks)",
+      "why": "Optional by the PID's own conditional: fixtures stand in only while CER is not live, so their absence is a warning rather than a failed boot. The CER contract doctrine above is what is required."
+    },
+    {
+      "id": "strategy-inventory",
+      "title": "Current strategy inventory and version state",
+      "path": "strategies/",
+      "type": "directory",
+      "required": false,
+      "expect_glob": "*",
+      "min_matches": 0,
+      "pid": "PID.md:216 (current strategy inventory/version state WHERE AVAILABLE)",
+      "why": "The PID explicitly qualifies this one with 'where available', so an empty or absent inventory warns and boots. Before any strategy has been governed there is nothing to load."
+    }
+  ]
+}
