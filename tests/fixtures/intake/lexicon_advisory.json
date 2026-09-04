@@ -16,6 +16,34 @@
       "responsible": "MATT"
     }
   },
+  "basis_qualifier_policy": {
+    "disposition": "REFUSE",
+    "severity": "ADVISORY",
+    "blocks": [
+      "PARAMETER_DEFINITION"
+    ],
+    "window": {
+      "unit": "SENTENCE",
+      "sentence_terminators": ".!?;",
+      "sentences_after": 1,
+      "description": "Test fixture: the sentence the match sits in, plus the one after it."
+    },
+    "why_unresolved_template": "Test fixture: \"{term_label}\" is re-based by {qualifier_phrases}.",
+    "resolution_needed": {
+      "kind": "MEASURABLE_DEFINITION",
+      "description_template": "Test fixture: state whether \"{phrase}\" uses the ruled basis or {qualifier_phrases}.",
+      "responsible": "MATT"
+    },
+    "limits": "Test fixture: declared surface patterns inside a declared window, nothing more."
+  },
+  "basis_qualifiers": [
+    {
+      "qualifier_id": "average_reference",
+      "category": "LOOKBACK",
+      "reason": "an average reference, which needs a lookback the single-bar basis does not have",
+      "pattern": "\\b(?:averages?|median)\\b"
+    }
+  ],
   "discretionary_markers": [
     {
       "marker_id": "health",

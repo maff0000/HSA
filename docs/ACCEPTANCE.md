@@ -4,18 +4,18 @@ Presentation target: **`FUNCTIONAL_ONLY`** (`PID.md:11`). The PID's explicit
 non-goals include dashboards/UI (`PID.md:275`), so there is no browser surface
 and no browser-verification gate applies. Evidence here is mechanical.
 
-Full suite at the time of writing: **753 passed**. `hsa boot` reports
-`16 artifacts declared: 16 loaded, 0 required missing, 0 optional absent`.
+Full suite at the time of writing: **772 passed**. `hsa boot` reports
+`17 artifacts declared: 17 loaded, 0 required missing, 0 optional absent`.
 
 ## Acceptance criteria (`PID.md:246-262`)
 
 | # | Criterion | Where it is proven |
 |---|---|---|
-| 1 | load durable doctrine without Matt re-explaining it | `hsa boot` (exit 0, 16/16); `docs/boot-manifest.json`; `tests/test_boot.py` (49) |
+| 1 | load durable doctrine without Matt re-explaining it | `hsa boot` (exit 0, 17/17); `docs/boot-manifest.json`; `tests/test_boot.py` (50), which now also asserts `docs/BOOT.md`'s sample output against a live run |
 | 2 | ingest a realistic raw strategy description | `strategies/*/*/source.txt` driven through `hsa intake`; `tests/test_intake.py` (30) |
-| 3 | identify ambiguity rather than guessing | `docs/AMBIGUITY-POLICY.md`; `tests/test_ambiguity.py` (28). Both directions proven — Example A's first-pass source was **refused** (exit 4) for "strong trend"/"clean breakout"; Example B's terms were **parameterised** with `hsa_guessed: false` |
+| 3 | identify ambiguity rather than guessing | `docs/AMBIGUITY-POLICY.md`; `tests/test_ambiguity.py` (38). Three directions proven — Example A's first-pass source was **refused** (exit 4) for "strong trend"/"clean breakout"; Example B's terms were **parameterised** with attribution; and a ruled term whose context re-bases it (*"large wick relative to the recent average"*, *"twice the 14-period ATR"*) is **refused** rather than resolved onto a basis the source displaced. A resolution reports `hsa_invented_basis: false` and `source_basis_agreement: "NOT_VERIFIED"` beside the scan that was actually run; it does not emit `hsa_guessed`, which claimed more than was checked |
 | 4 | decompose into independent atomic strategies | `catalogue/atomic/` (11 entries); `tests/test_catalogue.py` (149). Atomics cannot reference peers — structurally impossible in `contracts/atomic_strategy.schema.json` |
-| 5 | construct an explicit chain using canonical primitives | Example A `CONTEXT_TRIGGER`, Example B `SEQUENCE`; `tests/test_semantics.py` (85) |
+| 5 | construct an explicit chain using canonical primitives | Example A `CONTEXT_TRIGGER`, Example B `SEQUENCE`; `tests/test_semantics.py` (93). Per-input reason attribution (`PID.md:80`) is now bound mechanically: every `reason_fields` entry must name a chain `input_id` and a field that input's atomic emits, or a field the package's `output_contract` declares |
 | 6 | assign semantic timeframe roles | both packages' `timeframe_roles`; roles are assignments, not universal timeframes (`PID.md:93`) |
 | 7 | define timing/direction/persistence/expiry | both packages; `package.chain_agreement` enforces package and embedded chain agree |
 | 8 | map required inputs to HERMES | `required_hermes_fields` per atomic; `package.hermes_coverage` |
@@ -23,7 +23,7 @@ Full suite at the time of writing: **753 passed**. `hsa boot` reports
 | 10 | preserve strategy/version identity | id+version pinned everywhere including directory paths; embedded atomics byte-identical to catalogue entries |
 | 11 | define tests and evidence requirements | `deterministic_test_cases` and evidence requirements in both packages |
 | 12 | use/target CER semantics | `docs/CER-CONTRACT.md`; 8 fixtures; `tests/test_cer.py` (58), `tests/test_cer_evidence_container.py` (20) |
-| 13 | separately versioned candidate, never mutate a promoted strategy | `tests/test_versioning.py` (57), `tests/test_criterion_13_inventory.py` (12). **See the adjudication below** |
+| 13 | separately versioned candidate, never mutate a promoted strategy | `docs/VERSIONING.md`, now a **required boot artifact** so a fresh boot is shown the `derive_candidate` mechanism it must use; `tests/test_versioning.py` (57), `tests/test_criterion_13_inventory.py` (12). **See the adjudication below** |
 
 ## Acceptance examples (`PID.md:230-244`)
 
@@ -49,6 +49,12 @@ measurement basis is known and only the threshold is unset; **refuse** where
 the basis is itself undefined. Of the PID's five examples, two parameterise and
 four refuse, so criterion 3 stays testable and Example B stays reachable.
 Durable statement: `docs/AMBIGUITY-POLICY.md`.
+
+A later audit found the document promising more than the code delivered: it
+stated that a ruled term is re-based by its context and therefore refuses,
+and nothing implemented that. It does now, through a declared
+`basis_qualifiers` vocabulary inside a declared window, and the document
+states what that guard does not cover instead of implying completeness.
 
 ### 2. Immutability vs dormancy
 

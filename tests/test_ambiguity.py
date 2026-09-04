@@ -138,7 +138,21 @@ def test_a_parameterisation_is_never_silent():
     assert resolution["disposition"] == "PARAMETERISED"
     assert resolution["authority"] == "HUMAN_ARCHITECT_RULING"
     assert resolution["ruling_document"] == "docs/AMBIGUITY-POLICY.md"
-    assert resolution["hsa_guessed"] is False
+    # There is deliberately no ``hsa_guessed`` field. It was emitted as
+    # ``false`` on every resolution, which asserted more than the analyser had
+    # checked: it had verified that the basis came from a ratified ruling and
+    # had verified nothing about whether the source agreed with that basis.
+    # The two claims are now separated, and the second one says NOT_VERIFIED.
+    assert "hsa_guessed" not in resolution
+    assert resolution["basis_authority"] == "RATIFIED_LEXICON_RULING"
+    assert resolution["hsa_invented_basis"] is False
+    assert resolution["source_basis_agreement"] == "NOT_VERIFIED"
+    # And what WAS checked is recorded, including what it does not cover.
+    scan = resolution["basis_conflict_scan"]
+    assert scan["result"] == "NO_DECLARED_REBASING_FOUND"
+    assert scan["qualifiers_declared"] > 0
+    assert entry["source_language"] in scan["inspected_text"]
+    assert "not proven" in scan["limits"].lower() or "nothing more" in scan["limits"].lower()
     # The basis is ratified; the default is not. Saying so is what keeps a
     # provisional number from hardening into an unexamined decision.
     assert resolution["default_status"] == "PROVISIONAL_PENDING_EVIDENCE"
@@ -247,6 +261,155 @@ def test_candidate_definitions_are_offered_but_never_chosen():
 def test_every_emitted_refusal_validates_against_the_frozen_schema(name, source_type):
     result = _run(name, source_type)
     assert validate_document(result.document) == "not_sufficiently_defined"
+
+
+# --- a ruled term can be re-based by its context -----------------------------
+
+
+def test_the_policy_documents_own_worked_example_refuses():
+    """docs/AMBIGUITY-POLICY.md names this exact phrase as a refusal.
+
+    "Large wick relative to the recent average" is not the claim "large
+    wick": it introduces a lookback the ruled single-bar basis does not
+    cover. The document said so before the behaviour existed, and the
+    behaviour resolved the phrase at exit 0 — a required boot artifact
+    asserting something the code did not do. This is that gap, closed and
+    tested.
+    """
+    result = _run("rebased_wick_recent_average.txt", "MATT_OBSERVATION")
+    assert not result.sufficiently_defined
+    items = {item["item_id"]: item for item in result.document["unresolved_items"]}
+    assert "rebased_large_wick" in items
+    item = items["rebased_large_wick"]
+    assert item["severity"] == "BLOCKING"
+    assert "re-bases the measurement" in item["why_unresolved"]
+    # The ruled term is NOT reported as resolved anywhere.
+    assert "large 15m" not in " ".join(result.document["resolved_summary"])
+
+
+def test_a_ruled_term_rebased_onto_another_quantity_refuses():
+    """The source states 2 x ATR and that the bar range is irrelevant.
+
+    Applying the ruled wick-over-bar-range basis here would emit
+    ``candle.range`` as a required HERMES input for a trader who said the
+    bar range does not matter, and would hand FORGE a threshold the source
+    never gave. PID line 39 forbids exactly that.
+    """
+    result = _run("rebased_wick_atr_multiple.txt", "TRADER_EXPLANATION")
+    assert not result.sufficiently_defined
+    assert result.document["result"] == "STRATEGY_NOT_SUFFICIENTLY_DEFINED"
+    assert validate_document(result.document) == "not_sufficiently_defined"
+    item = next(
+        i
+        for i in result.document["unresolved_items"]
+        if i["item_id"] == "rebased_large_wick"
+    )
+    # The quantity the source actually named is quoted back at the reader.
+    assert "ATR" in item["why_unresolved"] or "atr" in item["why_unresolved"]
+    assert item["resolution_needed"]["responsible"] == "MATT"
+    # Nothing was mapped to HERMES off the displaced basis.
+    assert "required_hermes_fields" not in result.document
+
+
+def test_the_refusal_quotes_the_full_qualifying_context_not_just_the_term():
+    """Quoting only "large wick" would hide the words that caused the refusal.
+
+    docs/AMBIGUITY-POLICY.md promises source_language verbatim. Verbatim of
+    the matched span alone is not enough here: the qualifier is the evidence.
+    """
+    result = _run("rebased_wick_atr_multiple.txt", "TRADER_EXPLANATION")
+    item = next(
+        i
+        for i in result.document["unresolved_items"]
+        if i["item_id"] == "rebased_large_wick"
+    )
+    raw = (FIXTURES / "rebased_wick_atr_multiple.txt").read_text(encoding="utf-8")
+    quoted = item["source_language"]
+    assert quoted in raw, "source_language must be a verbatim slice of the source"
+    assert "large wick" in quoted
+    assert "ATR" in quoted
+
+
+def test_a_plain_ruled_term_with_no_rebasing_still_parameterises():
+    """The guard must not swallow the case the ruling exists to resolve."""
+    for name in (
+        "example_b_rejection_wick_sequence.txt",
+        "example_b_wick_rejection_sequence.txt",
+    ):
+        result = _run(name, "TRADER_EXPLANATION")
+        assert result.sufficiently_defined, name
+        ids = {entry["term_id"] for entry in result.document["resolved_terms"]}
+        assert {"large_wick", "no_wick_candle"} <= ids, name
+
+
+def test_the_rebasing_vocabulary_is_declared_data_not_code(lexicon):
+    """Reviewable without reading Python, exactly like every other ruling."""
+    assert lexicon.basis_qualifiers
+    for qualifier in lexicon.basis_qualifiers:
+        assert qualifier.qualifier_id
+        assert qualifier.category in (
+            "COMPARATIVE",
+            "LOOKBACK",
+            "ALTERNATIVE_BASIS",
+            "NEIGHBOUR",
+        )
+        assert qualifier.reason.strip()
+        assert qualifier.raw_pattern.strip()
+    # The PID-facing constructions the ruling has to cover are all declared.
+    patterns = " ".join(q.raw_pattern for q in lexicon.basis_qualifiers)
+    for construction in ("relative to", "compared", "versus", "against", "average",
+                         "recent", "atr", "true range", "other", "neighbou"):
+        assert construction in patterns, construction
+
+
+def test_the_inspected_window_is_declared_rather_than_chosen_in_code(lexicon):
+    """Window size is the reviewable half of the guard, so it lives in data."""
+    window = lexicon.basis_qualifier_policy["window"]
+    assert window["unit"] == "SENTENCE"
+    assert isinstance(window["sentences_after"], int)
+    assert window["sentence_terminators"]
+    assert window["description"].strip()
+
+
+def test_a_lexicon_with_no_basis_qualifiers_is_refused_at_load(tmp_path):
+    """An empty vocabulary would fail OPEN: every ruled term would resolve."""
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["basis_qualifiers"] = []
+    broken = tmp_path / "no_qualifiers.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="fail open"):
+        load_lexicon(broken)
+
+
+def test_basis_qualifier_policy_must_refuse(tmp_path):
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["basis_qualifier_policy"]["disposition"] = "PARAMETERISE"
+    broken = tmp_path / "open_rebasing.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="fails closed"):
+        load_lexicon(broken)
+
+
+def test_the_guard_does_not_claim_to_be_complete(lexicon):
+    """An overstated guard is worse than none, so the limit is declared."""
+    limits = lexicon.basis_qualifier_policy["limits"].lower()
+    assert "not proven" in limits or "passes it" in limits
+    assert "surface" in limits
+
+
+def test_the_policy_document_and_the_guard_describe_the_same_system():
+    """The document's carve-out and its 'context can fool it' limit agreed
+    on nothing before: one promised a refusal the other said was impossible.
+    Both passages must now describe what actually runs."""
+    text = POLICY.read_text(encoding="utf-8")
+    assert "A ruled term can be re-based by its context" in text
+    # The carve-out no longer stands alone as an unqualified promise.
+    assert "basis_qualifiers" in text
+    assert "hsa_guessed" in text, "the removed field must be explained, not vanish"
 
 
 # --- unknown terms fail closed: the property everything else rests on --------
@@ -406,6 +569,15 @@ def test_the_scan_is_deterministic(lexicon):
         f.term.term_id for f in second.term_findings
     ]
     request = build_request(text, "VIDEO_DERIVED", "unit test")
+    doc_a = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
+    doc_b = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
+    assert json.dumps(doc_a, sort_keys=True) == json.dumps(doc_b, sort_keys=True)
+
+    # And the same for a source that trips the re-basing guard, where the
+    # findings are grouped across occurrences and could otherwise come out in
+    # dict or set order.
+    rebased = (FIXTURES / "rebased_wick_atr_multiple.txt").read_text(encoding="utf-8")
+    request = build_request(rebased, "TRADER_EXPLANATION", "unit test")
     doc_a = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
     doc_b = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
     assert json.dumps(doc_a, sort_keys=True) == json.dumps(doc_b, sort_keys=True)

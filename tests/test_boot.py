@@ -528,3 +528,48 @@ def test_the_agent_definition_exists_and_boots_before_working():
         assert field in text
     assert "hsa.cli boot" in text
     assert "docs/HELIOS-STRATEGY-BLUEPRINT.md" in text
+
+
+def test_boot_md_shows_what_a_real_boot_actually_reports():
+    """The documented sample output must match a live run.
+
+    This section went stale and stayed stale: it told a fresh session the
+    catalogue held ONE entry and that `strategies/` was absent, while the
+    repository held eleven atomic strategies and both acceptance packages —
+    and `docs/ACCEPTANCE.md`, written in the same commit, quoted the correct
+    figure. `docs/BOOT.md` is a required boot artifact, so a fresh session
+    reads the wrong inventory out of the document whose whole job is to
+    describe the boot.
+
+    Only the load-bearing parts are asserted: the per-artifact status, the
+    entry count for each directory, and the summary line. Byte and line
+    counts drift with every edit and are not claims about what booted.
+    """
+    boot_md = (REPO_ROOT / "docs" / "BOOT.md").read_text(encoding="utf-8")
+    report = boot(REAL_MANIFEST, REPO_ROOT)
+
+    summary = "%d artifacts declared: %d loaded, %d required missing, %d optional absent" % (
+        len(report["artifacts"]),
+        len(report["loaded"]),
+        len(report["failures"]),
+        len(report["warnings"]),
+    )
+    assert summary in boot_md, (
+        "docs/BOOT.md does not show the summary line a real boot prints: %r"
+        % summary
+    )
+
+    documented = [" ".join(line.split()) for line in boot_md.splitlines()]
+    for artifact in report["artifacts"]:
+        if artifact["type"] != "directory":
+            continue
+        expected = "[ ok ] %s %s" % (artifact["path"], artifact["summary"])
+        assert " ".join(expected.split()) in documented, (
+            "docs/BOOT.md does not show %s as %s, which is what boot reports"
+            % (artifact["path"], artifact["summary"])
+        )
+
+    # Every declared artifact is named somewhere in the document, so a new
+    # boot entry cannot land without the sample being regenerated.
+    for artifact in report["artifacts"]:
+        assert artifact["path"] in boot_md, artifact["path"]

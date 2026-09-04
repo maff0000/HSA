@@ -120,6 +120,32 @@ after the one before, and the whole ordered set must complete inside
 - An optional step is skipped without breaking the ordering: if steps are
   1, 2 (optional), 3, then 1 followed by 3 inside the window is a match.
 
+#### The limit on ordering, stated rather than glossed
+
+Contiguity and uniqueness are the **only** ordering rules a check can
+enforce. Whether the order is the *right* order is not visible in the
+document at all.
+
+Swap `sequence_index` 1 and 2 on the Example B package and the strategy
+inverts — it now waits for a no-wick bar and then a rejection wick, the
+opposite setup — and it still validates, structurally and semantically,
+because 1 and 2 are still contiguous and still unique. Nothing is wrong with
+the document. Something is wrong with the strategy.
+
+That gap is not closable by a check, and trying would be worse than leaving
+it open. The correct order comes from the source, and HSA recovering it from
+the chain alone would mean deciding which of two orderings a trader meant —
+a trading decision it was never given, which `PID.md:39` forbids. There is no
+mechanical difference between "wick then confirmation" and "confirmation then
+wick" that does not come from outside the document.
+
+What does pin the order is `deterministic_test_cases` (`PID.md:142`): fixed
+HERMES facts with the exact expected output, which an inverted chain fails.
+So for a `SEQUENCE` chain the test cases are not a nice-to-have alongside the
+specification — **they are the only place the intended order is recoverable**,
+and a reviewer checking a sequence must read them against the source rather
+than trusting that a valid document is a correct one.
+
 ### `CONTEXT_TRIGGER`
 
 A `CONTEXT_TRIGGER` chain carries exactly two inputs' worth of roles: one
@@ -314,7 +340,10 @@ hatch — and not something to route around in a document.
 | `CONTEXT_TRIGGER` has *at most* one of each, and no other role | `hsa/semantics.py` |
 | `input_id` unique within a chain | `hsa/semantics.py` |
 | `sequence_index` contiguous from 1, no duplicates | `hsa/semantics.py` |
+| Whether that order is the *correct* order | **nothing** — see section 3, "The limit on ordering" |
 | `sequence_index` absent on a non-`SEQUENCE` chain | `hsa/semantics.py` |
+| Every `input_id` attributed in `reason_fields` | `hsa/semantics.py` |
+| Every `reason_fields` entry names a real emitted field | `hsa/semantics.py` |
 | An optional input is never the sole cause of a match | `hsa/semantics.py` |
 | CONTEXT timeframe strictly above TRIGGER | `hsa/semantics.py` |
 | Input timeframe agrees with the role model | `hsa/semantics.py` |

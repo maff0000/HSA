@@ -18,9 +18,18 @@ Forge-governed. Authoritative scope: [`PID.md`](PID.md).
 ## Boot it
 
 ```bash
-python3 -m pip install -r requirements.txt     # jsonschema only
-python3 -m hsa.cli boot                        # or: hsa boot
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install .        # jsonschema, plus the `hsa` command itself
+hsa boot
 ```
+
+Every command in this repository is written as `hsa …`, which exists only
+once the package is installed. A virtual environment is not optional on a
+current Debian or Ubuntu: the system Python is externally managed (PEP 668)
+and `pip install` outside one refuses to run. Without installing the package,
+install `requirements.txt` into the same virtual environment and use
+`python3 -m hsa.cli …` in place of `hsa …` everywhere.
 
 `hsa boot` verifies and loads every artifact in
 [`docs/boot-manifest.json`](docs/boot-manifest.json) and **exits non-zero if
@@ -34,7 +43,7 @@ an AI agent, use the standard agent definition at
 ## Validate a document
 
 ```bash
-python3 -m hsa.cli validate tests/fixtures/valid/strategy_package.json
+hsa validate tests/fixtures/valid/strategy_package.json
 ```
 
 Exit codes: `0` valid, `1` invalid (the failing JSON path is printed), `2`
@@ -55,6 +64,7 @@ incomplete boot.
 | [`docs/COMPOSITION-DOCTRINE.md`](docs/COMPOSITION-DOCTRINE.md) | How atomic outputs are combined into chains. |
 | [`docs/AMBIGUITY-POLICY.md`](docs/AMBIGUITY-POLICY.md) | How discretionary language is resolved, and how HSA refuses instead of guessing. |
 | [`docs/CER-CONTRACT.md`](docs/CER-CONTRACT.md) | CER canonical identities and evidence semantics. |
+| [`docs/VERSIONING.md`](docs/VERSIONING.md) | Immutability, lifecycle and `derive_candidate` — how a change becomes a separately versioned candidate (`PID.md:185-189`). |
 | [`contracts/`](contracts/) | The frozen JSON Schema contract set, plus [`contracts/README.md`](contracts/README.md). |
 | [`catalogue/atomic/`](catalogue/atomic/) | The catalogue of atomic strategies. |
 | [`hsa/`](hsa/) | The CLI: `hsa boot`, `hsa validate`. |
@@ -83,8 +93,9 @@ incomplete boot.
 Python 3.11+. Runtime dependency: `jsonschema` only (`PID.md:227`).
 
 ```bash
-python3 -m pip install -r requirements.txt
-python3 -m pip install pytest
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e ".[dev]"
 python3 -m pytest
 ```
 

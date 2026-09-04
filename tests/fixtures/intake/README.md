@@ -24,6 +24,8 @@ acceptance fixtures went missing from this table the first time.
 | `near_resistance_pullback.txt` | TRADER_EXPLANATION | refusal naming `near_resistance` |
 | `unknown_term_healthy_pullback.txt` | MATT_OBSERVATION | refusal — undeclared term fails closed |
 | `all_five_pid_phrases.txt` | VIDEO_DERIVED | refusal covering PID lines 114-118 |
+| `rebased_wick_recent_average.txt` | MATT_OBSERVATION | refusal — `docs/AMBIGUITY-POLICY.md`'s own worked example: a ruled term whose context re-bases it |
+| `rebased_wick_atr_multiple.txt` | TRADER_EXPLANATION | refusal — the source states an ATR basis and says the bar range is irrelevant, so the ruled bar-range basis does not apply |
 | `existing_specification.json` | EXISTING_SPECIFICATION | draft, structured-request form |
 | `empty.txt` | any | error: nothing to analyse |
 | `lexicon_advisory.json` | — | test lexicon whose items are ADVISORY, not BLOCKING |

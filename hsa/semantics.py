@@ -77,9 +77,11 @@ CHECKS: tuple[str, ...] = (
     "chain.context_trigger_timeframes",
     "chain.context_trigger_roles",
     "chain.timeframe_role_mapping",
+    "chain.reason_fields_attribute_inputs",
     "package.chain_agreement",
     "package.chain_inputs_embedded",
     "package.hermes_coverage",
+    "package.reason_fields_bound",
 )
 
 #: The document kinds that have semantic rules beyond their schema. Every
@@ -652,6 +654,60 @@ def _check_context_trigger_roles(chain: Mapping, prefix: str) -> list[Finding]:
     return findings
 
 
+def _check_reason_fields_attribute_inputs(chain: Mapping, prefix: str) -> list[Finding]:
+    """``per_input_evaluation_reported`` must be backed by named inputs.
+
+    PID line 80 requires an explicit reason for match and non-match, and
+    ``docs/COMPOSITION-DOCTRINE.md`` section "The reason requirement is the
+    strictest of them" says what that means: attribution must be **per
+    input**, using each atomic's own ``reason_field``. "The chain did not
+    match" is not a reason.
+
+    The schema can hold the three flags at ``const: true`` and can require
+    ``reason_fields`` to be non-empty, and that is all it can do — it cannot
+    compare ``reason_fields`` with the ``input_id`` list beside it. So a
+    chain could declare ``per_input_evaluation_reported: true`` and a
+    ``reason_fields`` of ``["reason"]``, naming none of its inputs, and pass
+    every structural check. The per-input requirement then rested entirely on
+    prose. This is the comparison the schema cannot make.
+
+    An entry attributes an input when it is written ``<input_id>.<field>``.
+    That is the convention already in force in the governed packages, and it
+    is the only one that binds a reason to a handle mechanically.
+    """
+    findings: list[Finding] = []
+    contract = chain.get("explanation_contract")
+    if not isinstance(contract, Mapping):
+        return findings
+    if contract.get("per_input_evaluation_reported") is not True:
+        return findings
+    fields = contract.get("reason_fields")
+    if not isinstance(fields, list):
+        return findings
+    named = {
+        str(entry).split(".", 1)[0]
+        for entry in fields
+        if isinstance(entry, str) and "." in entry
+    }
+    for index, item in enumerate(_objects(chain.get("inputs"))):
+        input_id = item.get("input_id")
+        if not isinstance(input_id, str) or input_id in named:
+            continue
+        findings.append(
+            Finding(
+                "chain.reason_fields_attribute_inputs",
+                _join(prefix, "explanation_contract", "reason_fields"),
+                "explanation_contract declares per_input_evaluation_reported "
+                "true but reason_fields names no field for input %r; PID line "
+                "80 and docs/COMPOSITION-DOCTRINE.md require the reason to be "
+                "attributed per input, written as %r, so a non-match can be "
+                "traced to the input that caused it"
+                % (input_id, input_id + ".<reason_field>"),
+            )
+        )
+    return findings
+
+
 def _check_references_resolve(
     chain: Mapping, catalogue: "Catalogue | None", prefix: str
 ) -> list[Finding]:
@@ -711,6 +767,7 @@ def check_chain(
     findings.extend(_check_timeframe_roles(chain, prefix))
     findings.extend(_check_context_trigger_timeframes(chain, prefix))
     findings.extend(_check_context_trigger_roles(chain, prefix))
+    findings.extend(_check_reason_fields_attribute_inputs(chain, prefix))
     findings.extend(_check_references_resolve(chain, catalogue, prefix))
     return findings
 
@@ -868,6 +925,128 @@ def _check_hermes_coverage(package: Mapping, prefix: str) -> list[Finding]:
     return findings
 
 
+def _check_reason_fields_bound(package: Mapping, prefix: str) -> list[Finding]:
+    """Every ``reason_fields`` entry must name something that exists.
+
+    ``reason_fields`` is a list of free strings as far as the schema is
+    concerned, so an entry can name a field nothing emits and still validate.
+    Both governed packages did exactly that in different directions: one
+    declared ``chain_reason``, which appears in no ``output_contract.fields``;
+    the other declared ``["reason"]``, which names none of its three inputs
+    while asserting ``per_input_evaluation_reported: true``. Per-input reason
+    attribution — a PID line 80 requirement — was resting on prose.
+
+    An entry binds one of two ways, and must bind one of them:
+
+    * ``<input_id>.<field>`` where ``input_id`` is a chain input and
+      ``<field>`` is a field that input's embedded atomic actually emits; or
+    * a bare name declared in the package's ``output_contract.fields``.
+
+    The package's own ``output_contract.reason_field`` must also appear, so
+    the chain-level reason PID line 80 requires is one of the fields the
+    contract promises to emit.
+    """
+    findings: list[Finding] = []
+    chain = package.get("chain")
+    if not isinstance(chain, Mapping):
+        return findings
+    contract = chain.get("explanation_contract")
+    if not isinstance(contract, Mapping):
+        return findings
+    declared = contract.get("reason_fields")
+    if not isinstance(declared, list):
+        return findings
+
+    output = package.get("output_contract")
+    output = output if isinstance(output, Mapping) else {}
+    output_fields = {
+        entry["name"]
+        for entry in _objects(output.get("fields"))
+        if isinstance(entry.get("name"), str)
+    }
+
+    atomic_fields: dict[tuple[Any, Any], set[str]] = {}
+    for atomic in _objects(package.get("atomic_strategies")):
+        atomic_output = atomic.get("output_contract")
+        atomic_output = atomic_output if isinstance(atomic_output, Mapping) else {}
+        atomic_fields[(atomic.get("strategy_id"), atomic.get("strategy_version"))] = {
+            entry["name"]
+            for entry in _objects(atomic_output.get("fields"))
+            if isinstance(entry.get("name"), str)
+        }
+
+    inputs = {
+        item["input_id"]: item
+        for item in _objects(chain.get("inputs"))
+        if isinstance(item.get("input_id"), str)
+    }
+
+    path = _join(prefix, "chain", "explanation_contract", "reason_fields")
+    for index, entry in enumerate(declared):
+        if not isinstance(entry, str):
+            continue
+        if "." not in entry:
+            if entry in output_fields:
+                continue
+            findings.append(
+                Finding(
+                    "package.reason_fields_bound",
+                    "%s[%d]" % (path, index),
+                    "reason field %r is declared by the explanation contract "
+                    "but is not a field of the package's output_contract "
+                    "(%s), and is not written as <input_id>.<field>; a reason "
+                    "field nothing emits cannot explain a match or a "
+                    "non-match (PID line 80)"
+                    % (entry, ", ".join(sorted(output_fields)) or "none"),
+                )
+            )
+            continue
+        handle, field = entry.split(".", 1)
+        if handle not in inputs:
+            findings.append(
+                Finding(
+                    "package.reason_fields_bound",
+                    "%s[%d]" % (path, index),
+                    "reason field %r attributes to input %r, which the chain "
+                    "does not declare (declared: %s)"
+                    % (entry, handle, ", ".join(sorted(inputs)) or "none"),
+                )
+            )
+            continue
+        item = inputs[handle]
+        key = (item.get("strategy_id"), item.get("strategy_version"))
+        emitted = atomic_fields.get(key)
+        if emitted is None:
+            # The atomic is not embedded. package.chain_inputs_embedded
+            # already says so; do not report the same defect twice.
+            continue
+        if field in emitted:
+            continue
+        findings.append(
+            Finding(
+                "package.reason_fields_bound",
+                "%s[%d]" % (path, index),
+                "reason field %r attributes to input %r, but %s %s emits no "
+                "field %r (it emits: %s)"
+                % (entry, handle, key[0], key[1], field, ", ".join(sorted(emitted))),
+            )
+        )
+
+    reason_field = output.get("reason_field")
+    if isinstance(reason_field, str) and reason_field not in declared:
+        findings.append(
+            Finding(
+                "package.reason_fields_bound",
+                path,
+                "the output_contract names %r as its reason_field, but the "
+                "explanation contract's reason_fields does not include it; "
+                "the chain-level reason PID line 80 requires must be one of "
+                "the fields the contract promises to emit" % reason_field,
+            )
+        )
+    return findings
+
+
 def check_package(
     package: Any,
     catalogue: "Catalogue | None" = None,
@@ -884,6 +1063,7 @@ def check_package(
     findings.extend(_check_package_chain_agreement(package, prefix))
     findings.extend(_check_chain_inputs_embedded(package, prefix))
     findings.extend(_check_hermes_coverage(package, prefix))
+    findings.extend(_check_reason_fields_bound(package, prefix))
     chain = package.get("chain")
     if isinstance(chain, Mapping):
         findings.extend(

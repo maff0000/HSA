@@ -355,14 +355,62 @@ def test_criterion_5_input_handles_are_unique(chain):
     assert len(handles) == len(set(handles))
 
 
-def test_criterion_5_the_chain_explains_match_and_non_match(chain):
+def test_criterion_5_the_chain_explains_match_and_non_match(package, chain, catalogue):
     """PID line 80: an explicit reason for match AND non-match, attributed
-    per input. A non-match with no reason is unauditable."""
+    per input. A non-match with no reason is unauditable.
+
+    This test used to assert the three const-true flags and the truthiness of
+    a minItems-1 array — four assertions the schema already guaranteed, so the
+    body could not fail for any document that passed ``hsa validate``. It was
+    covering a real defect while it did so: this package declared a reason
+    field named ``chain_reason``, which appears nowhere in its own
+    ``output_contract.fields``.
+    """
     contract = chain["explanation_contract"]
-    assert contract["emit_reason_on_match"] is True
-    assert contract["emit_reason_on_non_match"] is True
-    assert contract["per_input_evaluation_reported"] is True
-    assert contract["reason_fields"]
+    # The three flags above are const true in the frozen chain schema, so
+    # asserting them proves nothing a validated document could ever fail —
+    # and reason_fields is minItems 1, so a truthiness check on it is the
+    # same. What the schema CANNOT check, and what these packages had
+    # actually got wrong, is whether those field names name anything.
+    emitted = {field["name"] for field in package["output_contract"]["fields"]}
+    atomics = {
+        (atomic["strategy_id"], atomic["strategy_version"]): {
+            field["name"] for field in atomic["output_contract"]["fields"]
+        }
+        for atomic in package["atomic_strategies"]
+    }
+    handles = {item["input_id"]: item for item in chain["inputs"]}
+
+    # Every input is attributed, by its own handle. "The chain did not match"
+    # is not a reason (docs/COMPOSITION-DOCTRINE.md).
+    for input_id, item in handles.items():
+        entry = "%s.reason" % input_id
+        assert entry in contract["reason_fields"], input_id
+        key = (item["strategy_id"], item["strategy_version"])
+        assert "reason" in atomics[key], key
+
+    # And every declared field binds to something real.
+    for entry in contract["reason_fields"]:
+        if "." in entry:
+            handle, field = entry.split(".", 1)
+            assert handle in handles, entry
+            item = handles[handle]
+            assert field in atomics[(item["strategy_id"], item["strategy_version"])]
+        else:
+            assert entry in emitted, entry
+
+    # The chain-level reason is one the output contract promises to emit.
+    assert package["output_contract"]["reason_field"] in contract["reason_fields"]
+
+    # Finally the shipped check agrees, so this cannot pass here and fail in
+    # the tool a fresh boot actually runs.
+    findings = check_package(package, catalogue=catalogue)
+    assert [
+        finding
+        for finding in findings
+        if finding.check
+        in ("package.reason_fields_bound", "chain.reason_fields_attribute_inputs")
+    ] == []
 
 
 # --- criterion 6: semantic timeframe roles -----------------------------------

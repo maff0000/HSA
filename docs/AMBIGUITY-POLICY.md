@@ -100,12 +100,74 @@ The test is therefore mechanical: *can the quantity be named without
 choosing between constructions that disagree on real data?* If yes, the
 basis is known. If no, it is undefined, and that is material ambiguity.
 
-Note that a parameterisable term can still become a refusal when its
-context removes the basis. "Large wick relative to the recent average" is
-not the same claim as "large wick" — it introduces a lookback that the
-lexicon's single-bar basis does not cover. The lexicon rules on the phrase
-it declares; anything that changes the basis is a different term, and an
-undeclared term refuses (see "Unknown terms fail closed").
+## A ruled term can be re-based by its context
+
+A parameterisable term still becomes a refusal when its context removes the
+basis. "Large wick relative to the recent average" is not the same claim as
+"large wick" — it introduces a lookback that the lexicon's single-bar basis
+does not cover. The lexicon rules on the phrase it declares; anything that
+changes the basis is a different term, and an undeclared term refuses (see
+"Unknown terms fail closed").
+
+**This paragraph used to stand alone, and nothing implemented it.** The
+worked example above resolved at exit 0, and so did a source that said in as
+many words that the wick had to be *twice the 14-period ATR* and that *the
+bar range is irrelevant*: HSA applied its own bar-range basis over the top,
+emitted `candle.range` as a required HERMES input, raised nothing, and
+stamped the resolution `hsa_guessed: false`. Under PID line 148 FORGE would
+have implemented `wick / bar_range >= 0.6` for a trader who specified
+`wick >= 2 x ATR`. A document that is itself the authority (PID line 206)
+cannot assert a guard that does not exist, so the guard now exists. What
+follows is what it does, and — the more important half — what it does not.
+
+### What runs
+
+Before a `PARAMETERISE` term is allowed to resolve, the text around it is
+scanned for constructions that name a **different measurement basis**. Both
+halves of that scan are declared as data in `hsa/intake/lexicon.json`, for
+the same reason the rulings themselves are:
+
+- **`basis_qualifiers`** — the vocabulary. Each entry has a
+  `qualifier_id`, a `category` (`COMPARATIVE`, `LOOKBACK`,
+  `ALTERNATIVE_BASIS`, `NEIGHBOUR`), a human `reason` and a `pattern`. It
+  covers comparative constructions (*relative to*, *compared to*, *versus*,
+  *against the average*), lookbacks (*recent*, *the average*, *a rolling
+  mean*, *over the last N bars*, *N-period*) and alternative bases (*ATR*,
+  *true range*, *standard deviation*, *twice the …*, *in pips*, *the other
+  candles*, *its neighbours*).
+- **`basis_qualifier_policy.window`** — how much text is inspected: the
+  sentence the term sits in, plus the sentence after it. The window size is
+  the reviewable half of the guard, so it is declared rather than chosen in
+  code: widen it and more innocent prose refuses, narrow it and more
+  re-basing is missed.
+
+A term whose window contains a declared qualifier does not resolve. It
+becomes a `BLOCKING` unresolved item in a `STRATEGY_NOT_SUFFICIENTLY_DEFINED`
+result, naming the ruled basis, the constructions that displaced it, and the
+decision needed to settle which basis governs. Its `source_language` quotes
+the **full qualifying context**, not the matched phrase — quoting only "large
+wick" would hide the very words that caused the refusal.
+
+One term, one ruling: if any occurrence of a ruled term in a source is
+re-based, the term does not resolve anywhere in that source. Its parameter
+would be declared once for the whole draft and there is no coherent way to
+half-declare it, so it fails in the closed direction.
+
+### What it cannot do, stated plainly
+
+This is a **surface-pattern check over a declared vocabulary inside a
+declared window**. It is not comprehension, and general detection of
+re-basing in natural language is not achievable this way.
+
+- A re-basing phrased in words the vocabulary does not declare passes it.
+- A re-basing stated further away than the declared window passes it.
+- A construction it does recognise in innocent prose refuses a term that
+  should have resolved. That direction costs one round trip; the other costs
+  the audit trail, which is why the design leans this way.
+
+So a term that survives the check is **not proven** to carry the ruled basis.
+It is a term in which no *declared* re-basing was found. That is a narrower
+claim, and it is the one the output now makes.
 
 ## Attribution: a parameterisation is never silent
 
@@ -119,8 +181,28 @@ Every parameterised resolution in an intake draft carries:
   and units per PID line 140;
 - `authority: "HUMAN_ARCHITECT_RULING"` with `ruling_document` pointing at
   this file, and the `lexicon_term` and `lexicon_version` that supplied it;
-- `hsa_guessed: false` — the claim made explicit so it can be audited;
+- `basis_authority: "RATIFIED_LEXICON_RULING"` and
+  `hsa_invented_basis: false` — the claim that is genuinely verified: the
+  measurement basis came from a ruling in the lexicon, not from HSA;
+- `source_basis_agreement: "NOT_VERIFIED"` — the claim that is not, and
+  cannot be, verified in general: whether the source agreed with that basis;
+- `basis_conflict_scan` — what was actually run against the source: the
+  declared vocabulary, the number of qualifiers in it, the lexicon version,
+  the window rule, the verbatim text inspected, the `result`
+  (`NO_DECLARED_REBASING_FOUND`), and the scan's own declared `limits`;
 - `default_status: "PROVISIONAL_PENDING_EVIDENCE"`.
+
+**There is no `hsa_guessed` field, and its absence is deliberate.** It was
+emitted as `false` on every resolution. That was an overclaim: what had been
+checked was that the basis came from a ratified ruling; what had not been
+checked, at all, was whether the source said something different. The two
+claims are now separated and each is emitted at the strength it actually
+holds. The old key was **removed rather than redefined**, so a consumer still
+reading it fails loudly instead of reading a changed meaning out of a
+familiar name. A resolution recorded under an earlier lexicon version — such
+as the provenance note in `strategies/wick_rejection_sequence/0.1.0` — keeps
+the words it was written with; it is a record of what was emitted then, not a
+claim about what is emitted now.
 
 That last field is the honest part, and it deserves stating outright. **What
 this policy ratifies is the measurement basis, not the default value.** The
@@ -183,6 +265,11 @@ Reconciling those bounds changed a declared ruling, so
 `lexicon_version` that produced it, and a governed package records the draft
 it came from, so a citation of a lexicon version is a claim about what the
 ruling said *at that time*.
+
+Adding the `basis_qualifiers` vocabulary and its policy changed which
+sources resolve, so the lexicon moved again, from **1.1.0** to **1.2.0**.
+Same reasoning: a citation of a lexicon version is a claim about what the
+ruling said at that time.
 
 `strategies/wick_rejection_sequence/0.1.0` was ingested under lexicon 1.0.0
 and its provenance records the bounds that version declared — 0.3 to 0.9 and
@@ -290,7 +377,14 @@ follow, and both are real:
    survived unruled", never "this description is fully specified".
 2. **It matches surface patterns, so context can fool it.** The lexicon
    pattern is the unit of review; that is precisely why it lives in a data
-   file that a human can read and correct rather than in code.
+   file that a human can read and correct rather than in code. One family of
+   context error is checked rather than merely admitted: text that re-bases a
+   ruled term is caught by the declared `basis_qualifiers` vocabulary and
+   refuses (see "A ruled term can be re-based by its context"). That check is
+   itself surface patterns inside a declared window, so it narrows this limit
+   and does not remove it — which is why a resolution reports
+   `source_basis_agreement: "NOT_VERIFIED"` rather than claiming the source
+   and the ruling agree.
 
 What it *does* guarantee is narrower and worth having: **nothing the
 analyser recognises as discretionary ever passes through without a ruling.**

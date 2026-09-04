@@ -38,6 +38,7 @@ from hsa.intake.documents import (
     OUTCOME_NOT_SUFFICIENTLY_DEFINED,
     build_draft,
     build_not_sufficiently_defined,
+    unresolved_items,
     utc_now,
     write_document,
 )
@@ -115,16 +116,19 @@ def intake(
     The outcome is decided by one rule: if any unresolved item is BLOCKING,
     the result is a refusal. Otherwise it is a draft. ADVISORY items travel
     with the draft rather than stopping it.
+
+    The rule is read off the items themselves rather than re-derived from the
+    findings. It used to be re-derived, and that is how a whole class of
+    unresolved item could be built by ``documents`` and still never stop an
+    intake: two places decided "blocking" and only one of them knew about
+    every kind of finding.
     """
     resolved_lexicon = lexicon if lexicon is not None else load_lexicon()
     analysis = analyse(request["text"], resolved_lexicon)
     stamp = generated_at_utc or utc_now()
 
     blocking = any(
-        finding.term.severity == "BLOCKING" for finding in analysis.refused
-    ) or (
-        bool(analysis.unknown_findings)
-        and resolved_lexicon.unknown_term_policy["severity"] == "BLOCKING"
+        item["severity"] == "BLOCKING" for item in unresolved_items(analysis)
     )
 
     if blocking:

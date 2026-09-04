@@ -1,8 +1,8 @@
 {
-  "lexicon_version": "1.1.0",
+  "lexicon_version": "1.2.0",
   "ruling_document": "docs/AMBIGUITY-POLICY.md",
   "ratified_by": "HSA_ARCHITECT_RULING",
-  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.\n\nEvery PARAMETERISE term declares realised_by: the catalogue entry and parameter that its declared parameter is actually implemented as. Intake and the catalogue are two halves of one ruling, and the link between them is DECLARED here rather than left to matching names — the names deliberately do not match. tests/test_lexicon_catalogue_agreement.py fails if a link points at a catalogue entry or parameter that does not exist, or if the two sides disagree on type, units, default or allowed_range. A PARAMETERISE term also declares hermes_basis_relationship, which states how the basis fields intake declares are derived from the fields the catalogue entry actually consumes.",
+  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). A ruled term is also only ruled for the claim its pattern declares: basis_qualifiers lists the constructions that re-base a term onto a different measurement, and basis_qualifier_policy states what happens when one is found inside the declared window (a REFUSE, like any undeclared term) and what that check cannot see. Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.\n\nEvery PARAMETERISE term declares realised_by: the catalogue entry and parameter that its declared parameter is actually implemented as. Intake and the catalogue are two halves of one ruling, and the link between them is DECLARED here rather than left to matching names — the names deliberately do not match. tests/test_lexicon_catalogue_agreement.py fails if a link points at a catalogue entry or parameter that does not exist, or if the two sides disagree on type, units, default or allowed_range. A PARAMETERISE term also declares hermes_basis_relationship, which states how the basis fields intake declares are derived from the fields the catalogue entry actually consumes.",
 
   "unknown_term_policy": {
     "disposition": "REFUSE",
@@ -33,6 +33,39 @@
     {"marker_id": "vague_quantity", "reason": "an unquantified count", "pattern": "\\b(?:a few|several|lots of|a couple of|multiple)\\b"},
     {"marker_id": "hedge", "reason": "a hedged rule that never states when it applies", "pattern": "\\b(?:ideally|preferably|usually|typically|often|generally|normally|sometimes|tends to)\\b"},
     {"marker_id": "importance", "reason": "an importance claim with no stated construction", "pattern": "\\b(?:important|importantly|key|crucial|critical|major)\\b"}
+  ],
+
+  "basis_qualifier_policy": {
+    "disposition": "REFUSE",
+    "severity": "BLOCKING",
+    "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "HERMES_MAPPING"],
+    "window": {
+      "unit": "SENTENCE",
+      "sentence_terminators": ".!?;",
+      "sentences_after": 1,
+      "description": "The text inspected around a matched PARAMETERISE term: the sentence the match sits in, plus the one sentence after it. Sentences are split on the terminators above, over the lowercased whitespace-collapsed text. One sentence carries an inline re-basing (\"a large wick relative to the recent average\"); the following sentence carries the common trailing gloss (\"...a large wick. By large I mean twice the ATR.\"). The window is DECLARED here, not chosen in code, because its size is the reviewable half of this guard: widen it and more innocent prose is refused, narrow it and more re-basing is missed."
+    },
+    "why_unresolved_template": "HSA recognised the ruled term \"{term_label}\" here, but the text around it re-bases the measurement: {qualifiers}. The ratified basis for \"{term_label}\" is: {measurement_basis} docs/AMBIGUITY-POLICY.md rules on the phrase the lexicon declares, and anything that changes the basis is a different term. An undeclared term refuses rather than being resolved onto a basis the source did not state, because applying the ruled basis here would make HSA assert a measurement the source itself displaced (PID line 39; docs/AMBIGUITY-POLICY.md, 'A ruled term can be re-based by its context').",
+    "resolution_needed": {
+      "kind": "MEASURABLE_DEFINITION",
+      "description_template": "State which measurement basis governs \"{phrase}\": the ratified basis for \"{term_label}\" ({measurement_basis}) or the one the surrounding text names with {qualifier_phrases}. If the source's basis is a settled one, declare it in hsa/intake/lexicon.json as its own ruled term under docs/AMBIGUITY-POLICY.md so future intakes resolve it consistently. If the ratified basis was what the source meant, restate the source without the re-basing language.",
+      "responsible": "MATT"
+    },
+    "limits": "This is a declared surface-pattern check, not comprehension. It fires only on the constructions listed in basis_qualifiers, only inside the declared window, and only for PARAMETERISE terms. A re-basing phrased in words this vocabulary does not declare passes it, so a term that survives this check is NOT proven to carry the ruled basis — it is only a term in which no DECLARED re-basing was found. Every emitted resolution says exactly that rather than claiming more (docs/AMBIGUITY-POLICY.md, 'A ruled term can be re-based by its context')."
+  },
+
+  "basis_qualifiers": [
+    {"qualifier_id": "explicit_comparison", "category": "COMPARATIVE", "reason": "an explicit comparison construction, which states the ruling against something other than the term's own declared basis", "pattern": "\\b(?:relative to|compared (?:to|with)|in comparison (?:to|with)|measured against|benchmarked against|in relation to|normalised by|normalized by|scaled by|as a (?:multiple|fraction|percentage|percent|proportion|share) of)\\b"},
+    {"qualifier_id": "comparison_to_reference", "category": "COMPARATIVE", "reason": "a comparison against a named measurement reference", "pattern": "\\b(?:against|versus|vs\\.?|than)\\s+(?:the |its |their |a |an |that |these|those )?(?:[a-z0-9.%-]+\\s+){0,2}(?:average|averages|mean|median|atr|true range|typical|normal|usual|deviation|volatility|neighbours?|neighbors?|history|bars?|candles?|wicks?)\\b"},
+    {"qualifier_id": "average_reference", "category": "LOOKBACK", "reason": "an average or central-tendency reference, which needs a lookback the single-bar basis does not have", "pattern": "\\b(?:averages?|averaged|averaging|the mean|mean of|median|percentile)\\b"},
+    {"qualifier_id": "rolling_statistic", "category": "LOOKBACK", "reason": "a rolling statistic over previous bars", "pattern": "\\b(?:rolling|running|moving|trailing|smoothed|exponential)\\s+(?:average|mean|median|window|range|value)\\b"},
+    {"qualifier_id": "recent_history", "category": "LOOKBACK", "reason": "an appeal to recent history, which is a lookback and not a property of the evaluated bar", "pattern": "\\b(?:recent|recently|lately|historical|historically)\\b"},
+    {"qualifier_id": "lookback_window", "category": "LOOKBACK", "reason": "an explicit lookback window over earlier bars", "pattern": "\\b(?:over|across|during|within|in|from)\\s+the\\s+(?:last|past|previous|preceding|prior)\\b|\\b(?:last|past|previous|preceding|prior)\\s+\\d+\\b|\\b\\d+[ -]?(?:period|bar|candle|session)s?\\b"},
+    {"qualifier_id": "volatility_basis", "category": "ALTERNATIVE_BASIS", "reason": "a volatility measure named as the yardstick instead of the term's declared basis", "pattern": "\\b(?:atr|average true range|true range)\\b"},
+    {"qualifier_id": "dispersion_basis", "category": "ALTERNATIVE_BASIS", "reason": "a statistical dispersion measure named as the yardstick", "pattern": "\\b(?:standard deviations?|std ?dev|stdev|sigma|variance|z-?scores?)\\b"},
+    {"qualifier_id": "multiple_of_something", "category": "ALTERNATIVE_BASIS", "reason": "a multiplier applied to some other quantity, which makes that quantity the basis", "pattern": "\\b(?:twice|thrice|double|triple|half)\\s+(?:the|its|that|a|an)\\b|\\b\\d+(?:\\.\\d+)?\\s*(?:x|times)\\s+(?:the|its)\\b|\\bmultiples? of\\b"},
+    {"qualifier_id": "absolute_units", "category": "ALTERNATIVE_BASIS", "reason": "an absolute price unit, which is a different basis from a ratio measured on the bar", "pattern": "\\b(?:in pips|in points|in ticks|in dollars|in absolute (?:price )?terms|absolute price terms)\\b"},
+    {"qualifier_id": "other_bars", "category": "NEIGHBOUR", "reason": "other bars offered as the reference, which the single-bar basis does not read", "pattern": "\\b(?:other|surrounding|neighbouring|neighboring|adjacent|nearby|preceding|prior|previous|subsequent|following)\\s+(?:bars?|candles?|wicks?|prints?|ranges?)\\b|\\bits neighbou?rs?\\b"}
   ],
 
   "terms": [

@@ -12,27 +12,46 @@ not HSA and must not engineer a strategy.
 
 ## 1. The boot path
 
-### Step 0 — get the repository
+### Step 0 — get the repository and install HSA
 
 ```bash
 git clone https://github.com/maff0000/HSA.git
 cd HSA
-python3 -m pip install -r requirements.txt     # jsonschema only
+
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install .
 ```
 
 Python 3.11 or newer. The only runtime dependency is `jsonschema`
-(`PID.md:227`, keep the implementation lightweight).
+(`PID.md:227`, keep the implementation lightweight); `pip install .` pulls it
+in and puts the `hsa` command on `PATH`.
+
+**Install the package — do not stop at the dependency.** This document and
+every other file in the repository writes commands as `hsa …`, and `hsa` does
+not exist until the package is installed. A Step 0 that installed only
+`requirements.txt` left `hsa validate` in Step 3 failing at exit `127` from a
+clean clone, which is a boot path that is documented but not repeatable
+(`PID.md:218`).
+
+**Use a virtual environment.** On the development host (`dell-debian`,
+`PID.md:222`) and on any current Debian or Ubuntu, the system Python is
+marked externally managed (PEP 668) and `pip install` outside a virtual
+environment refuses to run at all. `.venv/` is already in `.gitignore`.
+
+If you would rather not install the package, install just the dependency into
+the same virtual environment and use the module form of every command in this
+document:
+
+```bash
+python3 -m pip install -r requirements.txt     # jsonschema only
+python3 -m hsa.cli boot                        # instead of: hsa boot
+```
 
 ### Step 1 — verify and load the doctrine
 
 ```bash
 hsa boot
-```
-
-Or, without installing the package:
-
-```bash
-python3 -m hsa.cli boot
 ```
 
 `hsa boot` reads [`docs/boot-manifest.json`](boot-manifest.json) — the single
@@ -94,24 +113,46 @@ skips it is not HSA.
 
 ## 3. What `hsa boot` reports
 
+Every block in this section is the output of a real `hsa boot` run against
+this repository. The only edit is the checkout path, shortened to `~/HSA`.
+`tests/test_boot.py::test_boot_md_shows_what_a_real_boot_actually_reports`
+compares the statuses, the directory entry counts and the summary line below
+against a live run, because this section went stale once — it claimed a
+one-entry catalogue and an absent `strategies/` while the repository held
+eleven atomic strategies and both acceptance packages.
+
 ```
-HSA boot — 2026-09-04T21:51:06Z
-manifest: /srv/HSA/docs/boot-manifest.json (version 1)
-root:     /srv/HSA
+HSA boot — 2026-09-04T23:25:58Z
+manifest: ~/HSA/docs/boot-manifest.json (version 1)
+root:     ~/HSA
 
   [   ok  ] docs/HSA-ROLE.md                                9.1 KB, 211 lines
   [   ok  ] docs/HELIOS-STRATEGY-BLUEPRINT.md               18.1 KB, 390 lines
-  [   ok  ] docs/BOOT.md                                    6.8 KB, 211 lines
+  [   ok  ] docs/BOOT.md                                    10.5 KB, 272 lines
   [   ok  ] contracts/README.md                             5.8 KB, 111 lines
-  ...
-  [   ok  ] catalogue/atomic/                               1 entry
-  [  warn ] strategies/                                     optional — no such directory
+  [   ok  ] contracts/common.defs.json                      8.3 KB, 202 lines
+  [   ok  ] contracts/atomic_strategy.schema.json           6.1 KB, 115 lines
+  [   ok  ] contracts/chain.schema.json                     12.1 KB, 256 lines
+  [   ok  ] contracts/strategy_package.schema.json          13.0 KB, 277 lines
+  [   ok  ] contracts/cer_reference.schema.json             3.4 KB, 62 lines
+  [   ok  ] contracts/not_sufficiently_defined.schema.json  6.4 KB, 132 lines
+  [   ok  ] docs/COMPOSITION-DOCTRINE.md                    19.4 KB, 397 lines
+  [   ok  ] catalogue/atomic/                               11 entries
+  [   ok  ] docs/AMBIGUITY-POLICY.md                        23.3 KB, 414 lines
+  [   ok  ] docs/VERSIONING.md                              13.0 KB, 326 lines
+  [   ok  ] docs/CER-CONTRACT.md                            14.0 KB, 311 lines
+  [   ok  ] contracts/fixtures/cer/                         8 entries
+  [   ok  ] strategies/                                     3 entries
 
-16 artifacts declared: 15 loaded, 0 required missing, 1 optional absent
+17 artifacts declared: 17 loaded, 0 required missing, 0 optional absent
 
 HSA booted. Read the loaded artifacts in the order above before engineering
 a strategy; see docs/BOOT.md.
 ```
+
+The byte and line figures are whatever those files were at the time of the
+run and are not asserted by the test; the statuses, the entry counts and the
+summary line are.
 
 Options:
 
@@ -140,11 +181,16 @@ Exit codes are the CLI's, shared by every command (see `hsa/cli.py`):
 
 ### 4.1 A required artifact is missing
 
+A real run of the tree above with `docs/CER-CONTRACT.md` and `strategies/`
+removed:
+
 ```
+  [   ok  ] docs/VERSIONING.md                              13.0 KB, 326 lines
   [MISSING] docs/CER-CONTRACT.md                            REQUIRED — no such file
+  [   ok  ] contracts/fixtures/cer/                         8 entries
   [  warn ] strategies/                                     optional — no such directory
 
-16 artifacts declared: 14 loaded, 1 required missing, 1 optional absent
+17 artifacts declared: 15 loaded, 1 required missing, 1 optional absent
 hsa: boot incomplete: 1 required artifact could not be loaded
   docs/CER-CONTRACT.md: missing (no such file)
 HSA has not booted. Its doctrine is incomplete, so it must not engineer a
@@ -161,8 +207,11 @@ holding fewer entries than the manifest requires fails the same way, marked
 `FAILED` rather than `MISSING`:
 
 ```
-  [ FAILED] catalogue/atomic/       REQUIRED — holds 0 entries matching '*', expected at least 1
-  [ FAILED] docs/CER-CONTRACT.md    REQUIRED — file is empty; doctrine that is not written is not loaded
+  [ FAILED] catalogue/atomic/                               REQUIRED — holds 0 entries matching '*', expected at least 1
+  [ FAILED] docs/CER-CONTRACT.md                            REQUIRED — file is empty; doctrine that is not written is not loaded
+  [  warn ] strategies/                                     optional — no such directory
+
+17 artifacts declared: 14 loaded, 2 required missing, 1 optional absent
 ```
 
 An empty file is not loaded doctrine.
@@ -189,7 +238,7 @@ vanished is a problem even though it does not fail the boot.
 ### 4.3 The manifest itself is broken
 
 ```
-hsa: boot manifest /srv/HSA/docs/boot-manifest.json is not valid JSON: ...
+hsa: boot manifest ~/HSA/docs/boot-manifest.json: ~/HSA/docs/boot-manifest.json is not valid JSON: Expecting property name enclosed in double quotes (line 1, column 3)
 ```
 
 Exit code `3`, and **nothing is checked**. A manifest that cannot be trusted

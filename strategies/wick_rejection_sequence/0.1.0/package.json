@@ -806,6 +806,9 @@
       "emit_reason_on_non_match": true,
       "per_input_evaluation_reported": true,
       "reason_fields": [
+        "rejection_wick_15m.reason",
+        "no_wick_confirmation_15m.reason",
+        "range_breakout_5m.reason",
         "reason"
       ]
     },

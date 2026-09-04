@@ -4,6 +4,16 @@ WHAT THIS IS: a rules-based analyser over the declared lexicon. It matches
 declared surface patterns, first the ruled terms and then the discretionary
 markers, and reports every marker occurrence that no ruled term consumed.
 
+Between those two passes sits the basis-qualifier check. A ruled
+PARAMETERISE term is only ruled for the claim the lexicon declares: "large
+wick" is ratified onto a single-bar wick-over-range basis, and "large wick
+relative to the recent average" is a different claim that ruling does not
+cover. So before a PARAMETERISE term is allowed to resolve, the declared
+window around it is scanned against the declared basis-qualifier vocabulary,
+and a term whose context re-bases it becomes an unresolved item instead of a
+resolution. Its limits are declared alongside it in the lexicon and are real:
+it recognises listed constructions inside a declared window, nothing more.
+
 WHAT THIS IS NOT: an LLM call, or anything that understands English. It
 cannot prove a description is unambiguous — absence of declared markers is
 not evidence of precision. What it does guarantee is narrower and is the
@@ -23,11 +33,13 @@ import re
 from dataclasses import dataclass
 from typing import Sequence
 
-from hsa.intake.lexicon import PARAMETERISE, Lexicon, Marker, Term
+from hsa.intake.lexicon import PARAMETERISE, BasisQualifier, Lexicon, Marker, Term
 
 __all__ = [
     "Occurrence",
     "TermFinding",
+    "QualifierHit",
+    "RebasedFinding",
     "UnknownFinding",
     "Analysis",
     "normalise",
@@ -89,10 +101,80 @@ class TermFinding:
 
     term: Term
     occurrences: tuple[Occurrence, ...]
+    #: The declared windows scanned for re-basing, one per occurrence, in the
+    #: same order. Empty for a REFUSE term, which is not scanned: it refuses
+    #: already, and there is no ruled basis for context to displace.
+    scanned_windows: tuple[Occurrence, ...] = ()
 
     @property
     def location(self) -> str:
         return "; ".join(occurrence.describe() for occurrence in self.occurrences)
+
+    @property
+    def scanned_text(self) -> str:
+        """The inspected windows, verbatim, deduplicated in order."""
+        seen: list[str] = []
+        for window in self.scanned_windows:
+            if window.text not in seen:
+                seen.append(window.text)
+        return " / ".join(seen)
+
+
+@dataclass(frozen=True)
+class QualifierHit:
+    """One declared re-basing construction, found in a term's window."""
+
+    qualifier: BasisQualifier
+    occurrence: Occurrence
+
+    def describe(self) -> str:
+        return "%s (%s) at %s: %r" % (
+            self.qualifier.qualifier_id,
+            self.qualifier.reason,
+            self.occurrence.describe(),
+            self.occurrence.text,
+        )
+
+
+@dataclass(frozen=True)
+class RebasedFinding:
+    """A ruled PARAMETERISE term whose context re-bases it. Fails closed.
+
+    The term matched, and its ruling would have resolved it. What stops that
+    is the declared vocabulary finding a construction in the term's window
+    that names a different measurement basis. The ruling covers the phrase
+    the lexicon declares, not a different claim built around it, so this is
+    an undeclared term and an undeclared term refuses.
+    """
+
+    item_id: str
+    term: Term
+    occurrences: tuple[Occurrence, ...]
+    hits: tuple[QualifierHit, ...]
+    #: The full span from the earliest to the latest of the term match and
+    #: the qualifying text, quoted verbatim. This, not the bare matched
+    #: phrase, is what a human needs in order to see the mis-resolution.
+    context: Occurrence
+    #: The declared window that was inspected, quoted verbatim.
+    window: Occurrence
+
+    @property
+    def location(self) -> str:
+        return "; ".join(occurrence.describe() for occurrence in self.occurrences)
+
+    @property
+    def qualifier_summary(self) -> str:
+        return "; ".join(hit.describe() for hit in self.hits)
+
+    @property
+    def qualifier_phrases(self) -> str:
+        """Just the offending phrases, quoted, for a one-line restatement."""
+        seen: list[str] = []
+        for hit in self.hits:
+            text = " ".join(hit.occurrence.text.split())
+            if text not in seen:
+                seen.append(text)
+        return ", ".join('"%s"' % text for text in seen)
 
 
 @dataclass(frozen=True)
@@ -115,6 +197,7 @@ class Analysis:
     lexicon: Lexicon
     term_findings: tuple[TermFinding, ...]
     unknown_findings: tuple[UnknownFinding, ...]
+    rebased_findings: tuple[RebasedFinding, ...] = ()
 
     @property
     def parameterised(self) -> tuple[TermFinding, ...]:
@@ -227,6 +310,83 @@ def _slug(value: str, limit: int) -> str:
     return slug[:limit].rstrip("_")
 
 
+def _sentence_bounds(norm: str, terminators: str) -> list[tuple[int, int]]:
+    """Cut ``norm`` into sentence spans on the declared terminator set.
+
+    The terminators come from the lexicon, not from here, because the size of
+    the inspected window is the reviewable half of the basis-qualifier guard.
+    Runs of terminators and the space after them belong to the sentence they
+    close, so every offset in ``norm`` falls inside exactly one span.
+    """
+    stops = set(terminators)
+    bounds: list[tuple[int, int]] = []
+    start = 0
+    index = 0
+    length = len(norm)
+    while index < length:
+        if norm[index] in stops:
+            while index < length and norm[index] in stops:
+                index += 1
+            while index < length and norm[index] == " ":
+                index += 1
+            bounds.append((start, index))
+            start = index
+            continue
+        index += 1
+    if start < length or not bounds:
+        bounds.append((start, length))
+    return bounds
+
+
+def _sentence_index(bounds: Sequence[tuple[int, int]], offset: int) -> int:
+    for index, (start, end) in enumerate(bounds):
+        if start <= offset < end:
+            return index
+    return len(bounds) - 1
+
+
+def _window_span(
+    bounds: Sequence[tuple[int, int]], start: int, end: int, sentences_after: int
+) -> tuple[int, int]:
+    """The declared window around a term match: its sentence(s), plus N more."""
+    first = _sentence_index(bounds, start)
+    last = _sentence_index(bounds, max(start, end - 1))
+    last = min(last + sentences_after, len(bounds) - 1)
+    return bounds[first][0], bounds[last][1]
+
+
+def _qualifier_hits(
+    norm: str,
+    qualifiers: Sequence[BasisQualifier],
+    window: tuple[int, int],
+    term_span: tuple[int, int],
+) -> list[tuple[int, int, BasisQualifier]]:
+    """Declared re-basing constructions inside ``window``, excluding the term.
+
+    A hit wholly inside the term's own matched span is part of the ruled
+    phrase the lexicon already declares, not context that re-bases it, so it
+    is dropped. Order is fixed: leftmost, then longest, then the order the
+    lexicon declares them in.
+    """
+    found: list[tuple[int, int, BasisQualifier]] = []
+    seen: set[tuple[int, int, str]] = set()
+    window_start, window_end = window
+    for order, qualifier in enumerate(qualifiers):
+        for match in qualifier.pattern.finditer(norm, window_start, window_end):
+            start, end = match.start(), match.end()
+            if end <= start:
+                continue
+            if term_span[0] <= start and end <= term_span[1]:
+                continue
+            key = (start, end, qualifier.qualifier_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((start, end, qualifier))
+    found.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2].qualifier_id))
+    return found
+
+
 def analyse(text: str, lexicon: Lexicon) -> Analysis:
     """Scan ``text`` against ``lexicon`` and return every finding."""
     norm, index_map = normalise(text)
@@ -250,18 +410,112 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         consumed.append((start, end))
         accepted.append((start, end, term))
 
+    # Pass 1b — the basis-qualifier check. A PARAMETERISE ruling covers the
+    # phrase the lexicon declares and nothing else, so before a ruled term is
+    # allowed to resolve, the declared window around it is scanned for
+    # declared constructions that name a different measurement basis. This is
+    # surface matching over a declared vocabulary inside a declared window;
+    # what it does not cover is stated in the lexicon's own
+    # basis_qualifier_policy['limits'] and repeated in every emitted
+    # resolution, because a guard that overstates itself is worse than none.
+    window_policy = lexicon.basis_qualifier_policy["window"]
+    bounds = _sentence_bounds(norm, str(window_policy["sentence_terminators"]))
+    sentences_after = int(window_policy["sentences_after"])
+
     term_occurrences: dict[str, list[Occurrence]] = {}
+    term_windows: dict[str, list[Occurrence]] = {}
     term_by_id: dict[str, Term] = {}
+    term_hits: dict[str, list[tuple[int, int, BasisQualifier]]] = {}
+    term_context: dict[str, tuple[int, int]] = {}
+    term_window_span: dict[str, tuple[int, int]] = {}
     for start, end, term in sorted(accepted, key=lambda item: item[0]):
+        window = _window_span(bounds, start, end, sentences_after)
         term_occurrences.setdefault(term.term_id, []).append(
             _occurrence(text, index_map, starts, start, end)
         )
+        term_windows.setdefault(term.term_id, []).append(
+            _occurrence(text, index_map, starts, window[0], window[1])
+        )
         term_by_id[term.term_id] = term
+        term_hits.setdefault(term.term_id, [])
+        if term.disposition != PARAMETERISE:
+            # A REFUSE term already refuses; there is no ruled basis for
+            # context to displace, so scanning it would only add noise.
+            continue
+        hits = _qualifier_hits(norm, lexicon.basis_qualifiers, window, (start, end))
+        if not hits:
+            continue
+        if term.term_id not in term_context:
+            term_context[term.term_id] = (
+                min([start] + [hit[0] for hit in hits]),
+                max([end] + [hit[1] for hit in hits]),
+            )
+            term_window_span[term.term_id] = window
+        term_hits[term.term_id].extend(hits)
 
+    # One term_id, one ruling. If any occurrence of a ruled term is re-based,
+    # the term does not resolve at all: its parameter would be declared once
+    # for the whole draft, so there is no coherent way to half-declare it, and
+    # the fail-closed direction is the one docs/AMBIGUITY-POLICY.md takes.
     term_findings = tuple(
-        TermFinding(term=term_by_id[term_id], occurrences=tuple(occurrences))
+        TermFinding(
+            term=term_by_id[term_id],
+            occurrences=tuple(occurrences),
+            scanned_windows=tuple(term_windows[term_id]),
+        )
         for term_id, occurrences in term_occurrences.items()
+        if not term_hits[term_id]
     )
+
+    rebased_findings: list[RebasedFinding] = []
+    used_item_ids: set[str] = {finding.term.term_id for finding in term_findings}
+    for term_id, occurrences in term_occurrences.items():
+        # A term matching twice inside one window finds the same
+        # constructions twice. Report each construction once.
+        hits = []
+        seen_hits: set[tuple[int, int, str]] = set()
+        for hit in term_hits[term_id]:
+            key = (hit[0], hit[1], hit[2].qualifier_id)
+            if key in seen_hits:
+                continue
+            seen_hits.add(key)
+            hits.append(hit)
+        # Two occurrences of one term can contribute hits out of document
+        # order; sort so the emitted item is byte-identical run to run.
+        hits.sort(key=lambda hit: (hit[0], -(hit[1] - hit[0]), hit[2].qualifier_id))
+        if not hits:
+            continue
+        context_start, context_end = term_context[term_id]
+        window = term_window_span[term_id]
+        item_id = ("rebased_" + term_id)[:64]
+        if not re.match(r"^[a-z][a-z0-9_]{2,63}$", item_id):
+            item_id = "rebased_term"
+        suffix = 2
+        unique = item_id
+        while unique in used_item_ids:
+            unique = "%s_%d" % (item_id[:60], suffix)
+            suffix += 1
+        used_item_ids.add(unique)
+        rebased_findings.append(
+            RebasedFinding(
+                item_id=unique,
+                term=term_by_id[term_id],
+                occurrences=tuple(occurrences),
+                hits=tuple(
+                    QualifierHit(
+                        qualifier=qualifier,
+                        occurrence=_occurrence(
+                            text, index_map, starts, hit_start, hit_end
+                        ),
+                    )
+                    for hit_start, hit_end, qualifier in hits
+                ),
+                context=_occurrence(
+                    text, index_map, starts, context_start, context_end
+                ),
+                window=_occurrence(text, index_map, starts, window[0], window[1]),
+            )
+        )
 
     # Pass 2 — fail closed. Any declared discretionary marker that no ruled
     # term consumed is an unresolved item. This is the mechanism that stops
@@ -292,7 +546,7 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         markers_by_key[key] = marker
 
     unknown_findings: list[UnknownFinding] = []
-    used_ids: set[str] = {finding.term.term_id for finding in term_findings}
+    used_ids: set[str] = set(used_item_ids)
     for key, occurrences in grouped.items():
         _marker_id, phrase = key
         item_id = "unknown_" + (_slug(phrase, 55) or _slug(_marker_id, 55) or "term")
@@ -318,4 +572,5 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         lexicon=lexicon,
         term_findings=term_findings,
         unknown_findings=tuple(unknown_findings),
+        rebased_findings=tuple(rebased_findings),
     )

@@ -61,7 +61,7 @@
     "emit_reason_on_match": true,
     "emit_reason_on_non_match": true,
     "per_input_evaluation_reported": true,
-    "reason_fields": ["reason", "per_input_reasons", "state_at_evaluation"]
+    "reason_fields": ["htf_context.reason", "ltf_trigger.reason", "reason", "per_input_reasons"]
   },
   "composition_assertions": {
     "inputs_are_atomic_only": true,

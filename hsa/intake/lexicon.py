@@ -36,6 +36,7 @@ __all__ = [
     "REFUSE",
     "Term",
     "Marker",
+    "BasisQualifier",
     "Lexicon",
     "default_lexicon_path",
     "load_lexicon",
@@ -68,6 +69,21 @@ _RESOLUTION_KINDS = (
     "DATA_SOURCE",
 )
 _RESPONSIBLE = ("MATT", "SOURCE_AUTHOR", "CER", "HERMES", "NEO")
+
+#: The declared categories of basis re-basing. Closed on purpose: a new kind
+#: of re-basing is a governance decision recorded in
+#: ``docs/AMBIGUITY-POLICY.md``, not a new string invented in a data file.
+_QUALIFIER_CATEGORIES = (
+    "COMPARATIVE",
+    "LOOKBACK",
+    "ALTERNATIVE_BASIS",
+    "NEIGHBOUR",
+)
+
+#: Window units the analyser knows how to cut. One value today; declared as an
+#: enum so a lexicon asking for a window nobody implements fails at load
+#: rather than silently inspecting the wrong span of text.
+_WINDOW_UNITS = ("SENTENCE",)
 
 _TERM_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 _STRATEGY_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
@@ -113,6 +129,27 @@ class Marker:
 
 
 @dataclass(frozen=True)
+class BasisQualifier:
+    """A declared construction that re-bases a ruled term.
+
+    ``docs/AMBIGUITY-POLICY.md`` rules on the phrase the lexicon declares.
+    Text around that phrase can name a different measurement basis — "large
+    wick RELATIVE TO THE RECENT AVERAGE" is not the claim "large wick" — and
+    the ruling does not cover the different claim. These are the
+    constructions HSA recognises as doing that. Like every other ruling in
+    this file they are DATA, so the vocabulary is reviewable without reading
+    Python, and like every other pattern here they are surface patterns and
+    therefore incomplete; see ``Lexicon.basis_qualifier_policy['limits']``.
+    """
+
+    qualifier_id: str
+    category: str
+    reason: str
+    pattern: "re.Pattern[str]"
+    raw_pattern: str
+
+
+@dataclass(frozen=True)
 class Lexicon:
     version: str
     ruling_document: str
@@ -120,7 +157,9 @@ class Lexicon:
     source_path: Path
     terms: tuple[Term, ...]
     markers: tuple[Marker, ...]
+    basis_qualifiers: tuple[BasisQualifier, ...]
     unknown_term_policy: Mapping[str, Any]
+    basis_qualifier_policy: Mapping[str, Any]
 
     def term(self, term_id: str) -> Term:
         for candidate in self.terms:
@@ -485,6 +524,98 @@ def _load_unknown_policy(raw: Any, path: Path) -> Mapping[str, Any]:
     return raw
 
 
+def _load_basis_qualifier_policy(raw: Any, path: Path) -> Mapping[str, Any]:
+    """Check the ruling that governs a re-based term.
+
+    A term whose context re-bases it is an UNDECLARED term, and an undeclared
+    term refuses (docs/AMBIGUITY-POLICY.md, "Unknown terms fail closed"). This
+    policy therefore has to refuse for the same reason
+    ``unknown_term_policy`` does, and the check is the same: any other
+    disposition would let a ruled basis be applied over a source that stated
+    a different one, which is the silent guess PID line 39 forbids.
+    """
+    where = "%s: basis_qualifier_policy" % path
+    if raw.get("disposition") != REFUSE:
+        raise LexiconError(
+            "%s: disposition must be REFUSE. A term whose context re-bases it "
+            "is an undeclared term, and an undeclared term fails closed; any "
+            "other value would let HSA apply a ruled basis over a source that "
+            "stated a different one (PID line 39)" % where
+        )
+    _check_enum(_require(raw, "severity", where), _SEVERITIES, where, "severity")
+    raw_blocks = _require(raw, "blocks", where)
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise LexiconError("%s: blocks must be a non-empty list" % where)
+    for block in raw_blocks:
+        _check_enum(block, _BLOCKS, where, "blocks entry")
+    _require_text(raw, "why_unresolved_template", where)
+    _require_text(raw, "limits", where)
+    resolution = _require(raw, "resolution_needed", where)
+    sub = "%s resolution_needed" % where
+    _check_enum(_require(resolution, "kind", sub), _RESOLUTION_KINDS, sub, "kind")
+    _check_enum(
+        _require(resolution, "responsible", sub), _RESPONSIBLE, sub, "responsible"
+    )
+    _require_text(resolution, "description_template", sub)
+
+    window = _require(raw, "window", where)
+    sub = "%s window" % where
+    _check_enum(_require(window, "unit", sub), _WINDOW_UNITS, sub, "unit")
+    _require_text(window, "sentence_terminators", sub)
+    after = _require(window, "sentences_after", sub)
+    if not isinstance(after, int) or isinstance(after, bool) or after < 0:
+        raise LexiconError(
+            "%s: sentences_after must be a non-negative integer; it is the "
+            "declared size of the inspected window and must not be guessed in "
+            "code" % sub
+        )
+    _require_text(window, "description", sub)
+    return raw
+
+
+def _load_basis_qualifiers(raw: Any, path: Path) -> tuple[BasisQualifier, ...]:
+    """Load the declared re-basing vocabulary. Empty is not allowed.
+
+    With no qualifiers declared, nothing would ever be recognised as changing
+    a ruled term's basis, and every ruled term would resolve on sight — the
+    exact behaviour the guard exists to stop. So an empty list fails the load,
+    for the same reason an empty ``discretionary_markers`` does.
+    """
+    if not isinstance(raw, list) or not raw:
+        raise LexiconError(
+            "%s: basis_qualifiers must be a non-empty list. With none "
+            "declared, no context could ever be recognised as re-basing a "
+            "ruled term and intake would fail open on exactly the case "
+            "docs/AMBIGUITY-POLICY.md says refuses" % path
+        )
+    qualifiers: list[BasisQualifier] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(raw):
+        where = "%s: basis_qualifiers[%d]" % (path, i)
+        qualifier_id = _require_text(entry, "qualifier_id", where)
+        if qualifier_id in seen:
+            raise LexiconError(
+                "%s declares qualifier_id %r more than once" % (path, qualifier_id)
+            )
+        seen.add(qualifier_id)
+        pattern_text = _require_text(entry, "pattern", where)
+        qualifiers.append(
+            BasisQualifier(
+                qualifier_id=qualifier_id,
+                category=_check_enum(
+                    _require(entry, "category", where),
+                    _QUALIFIER_CATEGORIES,
+                    where,
+                    "category",
+                ),
+                reason=_require_text(entry, "reason", where),
+                pattern=_compile(pattern_text, where),
+                raw_pattern=pattern_text,
+            )
+        )
+    return tuple(qualifiers)
+
+
 def load_lexicon(path: str | os.PathLike | None = None) -> Lexicon:
     """Load, check and return the declared lexicon."""
     target = Path(path) if path is not None else default_lexicon_path()
@@ -545,7 +676,13 @@ def load_lexicon(path: str | os.PathLike | None = None) -> Lexicon:
         source_path=target,
         terms=terms,
         markers=tuple(markers),
+        basis_qualifiers=_load_basis_qualifiers(
+            _require(raw, "basis_qualifiers", str(target)), target
+        ),
         unknown_term_policy=_load_unknown_policy(
             _require(raw, "unknown_term_policy", str(target)), target
+        ),
+        basis_qualifier_policy=_load_basis_qualifier_policy(
+            _require(raw, "basis_qualifier_policy", str(target)), target
         ),
     )

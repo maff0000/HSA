@@ -183,7 +183,18 @@ def test_criterion_3_both_discretionary_terms_are_parameterised_with_attribution
         term = resolved[term_id]
         resolution = term["resolution"]
         assert resolution["disposition"] == "PARAMETERISED"
-        assert resolution["hsa_guessed"] is False
+        # Not ``hsa_guessed: false``. That single boolean asserted both that
+        # the basis came from a ruling (checked) and that the source agreed
+        # with it (never checked). The two are separated now, and only the
+        # first is claimed outright.
+        assert "hsa_guessed" not in resolution
+        assert resolution["basis_authority"] == "RATIFIED_LEXICON_RULING"
+        assert resolution["hsa_invented_basis"] is False
+        assert resolution["source_basis_agreement"] == "NOT_VERIFIED"
+        scan = resolution["basis_conflict_scan"]
+        assert scan["result"] == "NO_DECLARED_REBASING_FOUND"
+        assert scan["qualifiers_declared"] > 0
+        assert term["source_language"] in scan["inspected_text"]
         assert resolution["authority"] == "HUMAN_ARCHITECT_RULING"
         assert resolution["ruling_document"] == RULING_DOCUMENT
         assert resolution["lexicon_term"] == term_id
@@ -420,13 +431,60 @@ def test_criterion_5_every_input_pins_an_exact_version(chain):
         assert item["strategy_version"]
 
 
-def test_criterion_5_the_chain_explains_match_and_non_match(chain):
-    """PID line 80. A non-match with no reason is unauditable."""
+def test_criterion_5_the_chain_explains_match_and_non_match(package, chain, catalogue):
+    """PID line 80. A non-match with no reason is unauditable.
+
+    The four assertions this test used to make were all guaranteed by the
+    frozen schema — three ``const: true`` flags and a truthiness check on an
+    array already ``minItems: 1`` — so nothing here could fail. Meanwhile this
+    package declared ``reason_fields: ["reason"]``, naming none of its three
+    ``input_id``s while asserting ``per_input_evaluation_reported: true``.
+    """
     contract = chain["explanation_contract"]
-    assert contract["emit_reason_on_match"] is True
-    assert contract["emit_reason_on_non_match"] is True
-    assert contract["per_input_evaluation_reported"] is True
-    assert contract["reason_fields"]
+    # The three flags above are const true in the frozen chain schema, so
+    # asserting them proves nothing a validated document could ever fail —
+    # and reason_fields is minItems 1, so a truthiness check on it is the
+    # same. What the schema CANNOT check, and what these packages had
+    # actually got wrong, is whether those field names name anything.
+    emitted = {field["name"] for field in package["output_contract"]["fields"]}
+    atomics = {
+        (atomic["strategy_id"], atomic["strategy_version"]): {
+            field["name"] for field in atomic["output_contract"]["fields"]
+        }
+        for atomic in package["atomic_strategies"]
+    }
+    handles = {item["input_id"]: item for item in chain["inputs"]}
+
+    # Every input is attributed, by its own handle. "The chain did not match"
+    # is not a reason (docs/COMPOSITION-DOCTRINE.md).
+    for input_id, item in handles.items():
+        entry = "%s.reason" % input_id
+        assert entry in contract["reason_fields"], input_id
+        key = (item["strategy_id"], item["strategy_version"])
+        assert "reason" in atomics[key], key
+
+    # And every declared field binds to something real.
+    for entry in contract["reason_fields"]:
+        if "." in entry:
+            handle, field = entry.split(".", 1)
+            assert handle in handles, entry
+            item = handles[handle]
+            assert field in atomics[(item["strategy_id"], item["strategy_version"])]
+        else:
+            assert entry in emitted, entry
+
+    # The chain-level reason is one the output contract promises to emit.
+    assert package["output_contract"]["reason_field"] in contract["reason_fields"]
+
+    # Finally the shipped check agrees, so this cannot pass here and fail in
+    # the tool a fresh boot actually runs.
+    findings = check_package(package, catalogue=catalogue)
+    assert [
+        finding
+        for finding in findings
+        if finding.check
+        in ("package.reason_fields_bound", "chain.reason_fields_attribute_inputs")
+    ] == []
 
 
 # --- the optional lower-timeframe trigger (PID line 242) ---------------------

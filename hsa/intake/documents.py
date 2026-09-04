@@ -36,7 +36,7 @@ from typing import Any, Mapping, Sequence
 from jsonschema import Draft202012Validator
 
 from hsa.contracts import contracts_dir, validate_document
-from hsa.intake.analyser import Analysis, TermFinding, UnknownFinding
+from hsa.intake.analyser import Analysis, RebasedFinding, TermFinding, UnknownFinding
 from hsa.intake.errors import IntakeError
 
 __all__ = [
@@ -151,11 +151,23 @@ def _provenance(request: Mapping[str, Any], ingested_at_utc: str) -> dict:
 def _resolution_provenance(finding: TermFinding, analysis: Analysis) -> dict:
     """Attribution for a parameterised term. Never silent, never a guess.
 
-    Records that a human-ratified ruling resolved the term, which ruling,
-    and that the DEFAULT it carries is provisional pending CER evidence.
-    See ``docs/AMBIGUITY-POLICY.md``, section "Attribution".
+    Records that a human-ratified ruling resolved the term, which ruling, and
+    that the DEFAULT it carries is provisional pending CER evidence. See
+    ``docs/AMBIGUITY-POLICY.md``, section "Attribution".
+
+    WHY THERE IS NO ``hsa_guessed`` FIELD. There used to be, always emitted as
+    ``false``. It was an overclaim: the analyser had checked that the basis
+    came from a ratified ruling, and had checked nothing at all about whether
+    the source agreed with that basis. It could not, and it still cannot in
+    general. What is emitted now is the two claims separated —
+    ``hsa_invented_basis`` (verified: the basis is the lexicon's, not
+    HSA's) and ``source_basis_agreement`` (NOT_VERIFIED, with the scan that
+    was actually run recorded beside it). The old name was REMOVED rather
+    than redefined so a consumer still reading it fails loudly instead of
+    reading a changed meaning out of a familiar key.
     """
     lexicon = analysis.lexicon
+    policy = lexicon.basis_qualifier_policy
     return {
         "disposition": "PARAMETERISED",
         "authority": "HUMAN_ARCHITECT_RULING",
@@ -164,7 +176,18 @@ def _resolution_provenance(finding: TermFinding, analysis: Analysis) -> dict:
         "lexicon_term": finding.term.term_id,
         "lexicon_version": lexicon.version,
         "pid_reference": finding.term.pid_reference,
-        "hsa_guessed": False,
+        "basis_authority": "RATIFIED_LEXICON_RULING",
+        "hsa_invented_basis": False,
+        "source_basis_agreement": "NOT_VERIFIED",
+        "basis_conflict_scan": {
+            "result": "NO_DECLARED_REBASING_FOUND",
+            "vocabulary": "%s basis_qualifiers" % lexicon.source_path.name,
+            "lexicon_version": lexicon.version,
+            "qualifiers_declared": len(lexicon.basis_qualifiers),
+            "window_rule": policy["window"]["description"],
+            "inspected_text": finding.scanned_text,
+            "limits": policy["limits"],
+        },
         "default_status": "PROVISIONAL_PENDING_EVIDENCE",
         "evidence_required": True,
         "evidence_note": (
@@ -172,6 +195,44 @@ def _resolution_provenance(finding: TermFinding, analysis: Analysis) -> dict:
             "must be settled by CER evidence before this strategy version is "
             "promoted (PID lines 143, 189, 198)."
         ),
+    }
+
+
+def _unresolved_from_rebased(finding: RebasedFinding, analysis: Analysis) -> dict:
+    """A ruled term whose context re-bases it. Refuses, and says why.
+
+    ``source_language`` is the FULL qualifying context, not the matched
+    phrase. Quoting only "large wick" here would hide the very words that
+    caused the refusal, and a reviewer would be reading an attribution with
+    the evidence removed (docs/AMBIGUITY-POLICY.md, "Attribution").
+    """
+    policy = analysis.lexicon.basis_qualifier_policy
+    term = finding.term
+    resolution = policy["resolution_needed"]
+    fields = {
+        # ``source_language`` below stays byte-for-byte verbatim. This copy is
+        # whitespace-flattened for readable prose, exactly as ``_widen`` does
+        # for an unknown term: presentation only, same words.
+        "phrase": " ".join(finding.context.text.split()),
+        "term_label": term.label,
+        "term_id": term.term_id,
+        "measurement_basis": term.measurement_basis or "",
+        "qualifiers": finding.qualifier_summary,
+        "qualifier_phrases": finding.qualifier_phrases,
+        "window": " ".join(finding.window.text.split()),
+    }
+    return {
+        "item_id": finding.item_id,
+        "source_language": finding.context.text,
+        "location": finding.location,
+        "why_unresolved": policy["why_unresolved_template"].format(**fields),
+        "blocks": list(policy["blocks"]),
+        "severity": policy["severity"],
+        "resolution_needed": {
+            "kind": resolution["kind"],
+            "description": resolution["description_template"].format(**fields),
+            "responsible": resolution["responsible"],
+        },
     }
 
 
@@ -216,12 +277,16 @@ def _unresolved_from_unknown(finding: UnknownFinding, analysis: Analysis) -> dic
 
 
 def unresolved_items(analysis: Analysis) -> list[dict]:
-    """Every unresolved item, ruled refusals first then unknown terms.
+    """Every unresolved item: ruled refusals, then re-based terms, then unknowns.
 
     Order is fixed so two runs over the same source produce byte-identical
     documents apart from the timestamp.
     """
     items = [_unresolved_from_term(finding) for finding in analysis.refused]
+    items.extend(
+        _unresolved_from_rebased(finding, analysis)
+        for finding in analysis.rebased_findings
+    )
     items.extend(
         _unresolved_from_unknown(finding, analysis)
         for finding in analysis.unknown_findings
@@ -387,6 +452,12 @@ def build_draft(
             "understand English (docs/AMBIGUITY-POLICY.md).",
             "Every parameter default above is PROVISIONAL and must be settled "
             "by CER evidence before promotion.",
+            "Each resolution records a basis_conflict_scan: the declared "
+            "re-basing vocabulary was scanned over the declared window and "
+            "found nothing. That is NOT proof the source meant the ruled "
+            "basis, which is why source_basis_agreement reads NOT_VERIFIED "
+            "and why no hsa_guessed field is emitted (docs/AMBIGUITY-POLICY.md, "
+            "'A ruled term can be re-based by its context').",
         ],
     }
     return document

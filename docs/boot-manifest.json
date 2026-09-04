@@ -137,6 +137,15 @@
       "why": "Not named as its own bullet in the PID.md:208-216 boot list, but PID.md:252 requires a FRESH BOOT to identify ambiguity rather than guess. That behaviour cannot be loaded from doctrine that boot does not load, so this manifest treats it as required."
     },
     {
+      "id": "versioning-doctrine",
+      "title": "Strategy versioning and portfolio doctrine",
+      "path": "docs/VERSIONING.md",
+      "type": "file",
+      "required": true,
+      "pid": "PID.md:183-200 (promoted versions are immutable; a modification is a separately versioned candidate); PID.md:262 (acceptance criterion 13); PID.md:216 (current strategy inventory/version state)",
+      "why": "Acceptance criterion 13 requires a fresh boot to produce a separately versioned CANDIDATE rather than mutate a promoted strategy. This is the only artifact that states the lifecycle, the immutability rule and the derive_candidate mechanism that satisfies it, and three other required boot artifacts (docs/AMBIGUITY-POLICY.md, docs/CER-CONTRACT.md) already cite it as the authority on in-place edits. Leaving it out of the boot set meant a session could satisfy every other criterion and never be shown how to satisfy this one."
+    },
+    {
       "id": "cer-contract",
       "title": "CER contract and evidence semantics",
       "path": "docs/CER-CONTRACT.md",

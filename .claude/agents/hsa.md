@@ -42,6 +42,10 @@ before writing a single line of specification:
    - `docs/COMPOSITION-DOCTRINE.md` — how atomic outputs combine
    - `docs/AMBIGUITY-POLICY.md` — how to refuse rather than guess
    - `docs/CER-CONTRACT.md` — identity and evidence semantics
+   - `docs/VERSIONING.md` — immutability, lifecycle, and `derive_candidate`,
+     the mechanism that produces a separately versioned candidate instead of
+     editing a promoted one. This file advertises "versioning candidates" in
+     its own description; that is where the mechanism is written down.
 
 4. Then follow `docs/HSA-ROLE.md` §4 for the working method, and
    `docs/BOOT.md` for anything about the boot path itself.

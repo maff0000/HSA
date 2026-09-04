@@ -452,7 +452,7 @@
       "reason_fields": [
         "htf_cross_context.reason",
         "ltf_breakout_trigger.reason",
-        "chain_reason"
+        "reason"
       ]
     },
     "composition_assertions": {

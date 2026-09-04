@@ -314,20 +314,31 @@ def test_timeframe_minutes_reads_m_as_minutes():
 # validated structurally. These pin the semantic layer closing that.
 
 
-def _third_input(role, timeframe, input_id="third_wheel"):
-    return {
-        "input_id": input_id,
-        "strategy_id": "rejection_wick",
-        "strategy_version": "1.0.0",
-        "timeframe_role": role,
-        "timeframe": timeframe,
-        "direction": "INHERIT",
-    }
+def _add_third_input(chain, role, timeframe, input_id="third_wheel"):
+    """Append a third input, keeping everything unrelated to it coherent.
+
+    The explanation contract must attribute a reason to every input
+    (``chain.reason_fields_attribute_inputs``), so an input added without one
+    would make these role tests fail for a second, unrelated reason. Tests
+    that want the reason binding broken break it explicitly.
+    """
+    chain["inputs"].append(
+        {
+            "input_id": input_id,
+            "strategy_id": "rejection_wick",
+            "strategy_version": "1.0.0",
+            "timeframe_role": role,
+            "timeframe": timeframe,
+            "direction": "INHERIT",
+        }
+    )
+    chain["explanation_contract"]["reason_fields"].append("%s.reason" % input_id)
+    return chain
 
 
 def test_undefined_third_role_under_context_trigger_is_reported(chain_doc, catalogue):
     """A LOCATION input under CONTEXT_TRIGGER has no defined meaning."""
-    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    _add_third_input(chain_doc, "LOCATION", "1H")
     chain_doc["timeframe_roles"]["LOCATION"] = "1H"
 
     finding = _only(
@@ -345,14 +356,14 @@ def test_the_schema_alone_accepts_the_undefined_third_role(chain_doc):
     dead weight. It does not, so the document below validates structurally
     while carrying a role the doctrine assigns no combination rule to.
     """
-    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    _add_third_input(chain_doc, "LOCATION", "1H")
     chain_doc["timeframe_roles"]["LOCATION"] = "1H"
     assert validate_document(chain_doc) == "chain"
 
 
 def test_second_trigger_under_context_trigger_is_reported(chain_doc, catalogue):
     """``contains`` is satisfied by one TRIGGER or by two."""
-    chain_doc["inputs"].append(_third_input("TRIGGER", "5M", "second_trigger"))
+    _add_third_input(chain_doc, "TRIGGER", "5M", "second_trigger")
 
     finding = _only(
         check_chain(chain_doc, catalogue=catalogue), "chain.context_trigger_roles"
@@ -363,7 +374,7 @@ def test_second_trigger_under_context_trigger_is_reported(chain_doc, catalogue):
 
 
 def test_second_context_under_context_trigger_is_reported(chain_doc, catalogue):
-    chain_doc["inputs"].append(_third_input("CONTEXT", "4H", "second_context"))
+    _add_third_input(chain_doc, "CONTEXT", "4H", "second_context")
 
     findings = check_chain(chain_doc, catalogue=catalogue)
     paths = _paths(findings, "chain.context_trigger_roles")
@@ -384,7 +395,7 @@ def test_a_third_role_is_only_rejected_under_context_trigger(chain_doc, catalogu
     general; a check that fired under ALL would be wrong.
     """
     chain_doc["primitive"] = "ALL"
-    chain_doc["inputs"].append(_third_input("LOCATION", "1H"))
+    _add_third_input(chain_doc, "LOCATION", "1H")
     chain_doc["timeframe_roles"]["LOCATION"] = "1H"
     assert "chain.context_trigger_roles" not in _checks(
         check_chain(chain_doc, catalogue=catalogue)
@@ -431,6 +442,102 @@ def test_agreeing_role_model_is_accepted(chain_doc, catalogue):
     assert "chain.timeframe_role_mapping" not in _checks(
         check_chain(chain_doc, catalogue=catalogue)
     )
+
+
+# --- chain.reason_fields_attribute_inputs / package.reason_fields_bound ------
+
+
+def test_the_schema_alone_accepts_a_reason_field_bound_to_nothing(package_doc):
+    """Why these two checks have to exist at all.
+
+    ``reason_fields`` is an array of non-empty strings with ``minItems: 1``.
+    Any string satisfies it, including one naming a field nothing emits and
+    one naming no input at all, so PID line 80's per-input attribution was
+    enforced by prose and by nothing else.
+    """
+    package_doc["chain"]["explanation_contract"]["reason_fields"] = ["not_a_field"]
+    assert validate_document(package_doc) == "strategy_package"
+
+
+def test_per_input_attribution_must_name_every_input(chain_doc, catalogue):
+    """``per_input_evaluation_reported: true`` with no input named is a claim
+    the document does not keep (docs/COMPOSITION-DOCTRINE.md, "Attribution
+    must be per input, using each atomic's own reason_field")."""
+    chain_doc["explanation_contract"]["reason_fields"] = ["reason"]
+    findings = check_chain(chain_doc, catalogue=catalogue)
+    assert _checks(findings) == {"chain.reason_fields_attribute_inputs"}
+    assert len(findings) == 2
+    assert "htf_context" in findings[0].message
+    assert "ltf_trigger" in findings[1].message
+
+
+def test_per_input_attribution_is_not_demanded_when_it_is_not_claimed(chain_doc, catalogue):
+    """The check reads the document's own flag rather than imposing a style.
+
+    The frozen schema pins the flag at ``const: true``, so this can only be
+    reached by a caller checking a chain fragment; it is asserted so the
+    check cannot start firing on documents that never made the claim.
+    """
+    chain_doc["explanation_contract"]["per_input_evaluation_reported"] = False
+    chain_doc["explanation_contract"]["reason_fields"] = ["reason"]
+    assert check_chain(chain_doc, catalogue=catalogue) == []
+
+
+def test_a_reason_field_naming_no_output_field_is_reported(package_doc, catalogue):
+    """Package A shipped ``chain_reason``, which its output_contract never
+    declared. A reason field nothing emits cannot explain anything."""
+    package_doc["chain"]["explanation_contract"]["reason_fields"].append("chain_reason")
+    finding = _only(
+        check_package(package_doc, catalogue=catalogue), "package.reason_fields_bound"
+    )
+    assert finding.path.endswith("reason_fields[4]")
+    assert "chain_reason" in finding.message
+    assert "output_contract" in finding.message
+
+
+def test_a_reason_field_attributing_to_an_unknown_input_is_reported(
+    package_doc, catalogue
+):
+    package_doc["chain"]["explanation_contract"]["reason_fields"][0] = (
+        "no_such_input.reason"
+    )
+    findings = check_package(package_doc, catalogue=catalogue)
+    bound = [f for f in findings if f.check == "package.reason_fields_bound"]
+    assert len(bound) == 1
+    assert "no_such_input" in bound[0].message
+
+
+def test_a_reason_field_the_atomic_does_not_emit_is_reported(package_doc, catalogue):
+    """The handle exists; the field behind it does not. Still unbound."""
+    package_doc["chain"]["explanation_contract"]["reason_fields"][0] = (
+        "htf_context.explanation"
+    )
+    findings = check_package(package_doc, catalogue=catalogue)
+    bound = [f for f in findings if f.check == "package.reason_fields_bound"]
+    assert len(bound) == 1
+    assert "golden_cross" in bound[0].message
+    assert "explanation" in bound[0].message
+
+
+def test_the_output_contracts_own_reason_field_must_be_declared(package_doc, catalogue):
+    """PID line 80 wants a chain-level reason, and it must be one the
+    contract promises to emit."""
+    fields = package_doc["chain"]["explanation_contract"]["reason_fields"]
+    package_doc["chain"]["explanation_contract"]["reason_fields"] = [
+        entry for entry in fields if entry != "reason"
+    ]
+    finding = _only(
+        check_package(package_doc, catalogue=catalogue), "package.reason_fields_bound"
+    )
+    assert "reason_field" in finding.message
+
+
+def test_an_unembedded_input_is_not_reported_twice(package_doc, catalogue):
+    """``package.chain_inputs_embedded`` already owns that complaint."""
+    package_doc["chain"]["inputs"][0]["strategy_version"] = "9.9.9"
+    findings = check_package(package_doc, catalogue=catalogue)
+    assert "package.reason_fields_bound" not in _checks(findings)
+    assert "package.chain_inputs_embedded" in _checks(findings)
 
 
 # --- package.chain_agreement -------------------------------------------------
@@ -626,7 +733,8 @@ def test_every_declared_check_can_actually_fire(chain_doc, package_doc, catalogu
         lambda doc: doc["inputs"][1].__setitem__("strategy_id", "no_such_strategy"),
         lambda doc: doc["inputs"][0].__setitem__("timeframe", "1M"),
         lambda doc: doc["timeframe_roles"].__setitem__("CONTEXT", "1D"),
-        lambda doc: doc["inputs"].append(_third_input("LOCATION", "1H")),
+        lambda doc: _add_third_input(doc, "LOCATION", "1H"),
+        lambda doc: doc["inputs"][0].__setitem__("input_id", "renamed_but_unattributed"),
     ):
         emitted.update(finding.check for finding in chain_variant(mutate))
 
@@ -635,6 +743,9 @@ def test_every_declared_check_can_actually_fire(chain_doc, package_doc, catalogu
         lambda doc: doc["chain"]["inputs"][1].__setitem__("strategy_id", "rejection_wick"),
         lambda doc: doc.__setitem__(
             "required_hermes_fields", doc["required_hermes_fields"][:1]
+        ),
+        lambda doc: doc["chain"]["explanation_contract"]["reason_fields"].append(
+            "no_such_output_field"
         ),
     ):
         emitted.update(finding.check for finding in package_variant(mutate))
