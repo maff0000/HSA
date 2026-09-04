@@ -1,0 +1,121 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "rejection_wick",
+  "strategy_version": "1.0.0",
+  "title": "Rejection wick",
+  "description": "A bar whose wick on one side is at least wick_to_range_ratio_min of the bar range, whose body is at most body_to_range_ratio_max of the bar range, and whose opposing wick is at most opposing_wick_to_range_ratio_max of the bar range. The bar range must also be at least min_range_atr_multiple of ATR, so the shape is not read from a bar too compressed to carry it.",
+  "thesis": "Price traded through a level and was returned before the close, so the extreme was not accepted. The proportion of the bar spent beyond the eventual close is the measurable trace of that rejection.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "candle.open", "purpose": "Open of the evaluated bar.", "timeframe": "15M"},
+    {"field": "candle.high", "purpose": "High of the evaluated bar, used for the upper wick.", "timeframe": "15M"},
+    {"field": "candle.low", "purpose": "Low of the evaluated bar, used for the lower wick.", "timeframe": "15M"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar.", "timeframe": "15M"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale the minimum bar range.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "wick_to_range_ratio_min",
+      "description": "Minimum length of the rejecting wick divided by the total bar range (candle.high minus candle.low). This is the measurable replacement for the discretionary wick-size phrase at PID.md line 114.",
+      "type": "number",
+      "default": 0.6,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.3, "maximum": 0.95}
+    },
+    {
+      "name": "body_to_range_ratio_max",
+      "description": "Maximum body length, the absolute difference of open and close, divided by the total bar range.",
+      "type": "number",
+      "default": 0.35,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.05, "maximum": 0.7}
+    },
+    {
+      "name": "opposing_wick_to_range_ratio_max",
+      "description": "Maximum length of the wick opposite the rejecting wick, divided by the total bar range. Bounding it excludes bars with a wick on each side, which express indecision rather than rejection of one extreme.",
+      "type": "number",
+      "default": 0.25,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.0, "maximum": 0.6}
+    },
+    {
+      "name": "min_range_atr_multiple",
+      "description": "Minimum total bar range as a multiple of ATR. Ratios computed on a bar range that is a fraction of prevailing volatility are dominated by rounding rather than by rejection.",
+      "type": "number",
+      "default": 0.5,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.0, "maximum": 5.0}
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used by min_range_atr_multiple, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when the lower wick, from min(open, close) down to candle.low, is the rejecting wick; SHORT when the upper wick, from candle.high down to max(open, close), is the rejecting wick.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when every declared ratio condition holds on the evaluated bar."},
+      {"name": "direction", "type": "string", "description": "LONG for a lower-wick rejection, SHORT for an upper-wick rejection."},
+      {"name": "wick_ratio", "type": "number", "description": "Rejecting wick length divided by the total bar range."},
+      {"name": "body_ratio", "type": "number", "description": "Body length divided by the total bar range."},
+      {"name": "opposing_wick_ratio", "type": "number", "description": "Opposing wick length divided by the total bar range."},
+      {"name": "reason", "type": "string", "description": "Each ratio condition, its threshold and whether it held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "lower_wick_rejection_matches",
+      "description": "Bar range 10.0, lower wick 7.0 (0.7), body 2.0 (0.2), upper wick 1.0 (0.1), ATR 8.0 so the range clears 0.5 ATR.",
+      "given_hermes_facts": {"candle.open": 2007.0, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2009.0, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_min": 0.6, "body_to_range_ratio_max": 0.35, "opposing_wick_to_range_ratio_max": 0.25, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "LONG", "wick_ratio": 0.7, "body_ratio": 0.2, "opposing_wick_ratio": 0.1}
+    },
+    {
+      "case_id": "upper_wick_rejection_matches",
+      "description": "Bar range 10.0, upper wick 7.0 (0.7), body 2.0 (0.2), lower wick 1.0 (0.1), ATR 8.0.",
+      "given_hermes_facts": {"candle.open": 2003.0, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2001.0, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_min": 0.6, "body_to_range_ratio_max": 0.35, "opposing_wick_to_range_ratio_max": 0.25, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "SHORT", "wick_ratio": 0.7, "body_ratio": 0.2, "opposing_wick_ratio": 0.1}
+    },
+    {
+      "case_id": "wick_ratio_below_threshold_does_not_match",
+      "description": "Bar range 10.0 with a lower wick of 4.0 (0.4), which fails the 0.6 threshold.",
+      "given_hermes_facts": {"candle.open": 2004.0, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2008.0, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_min": 0.6, "body_to_range_ratio_max": 0.35, "opposing_wick_to_range_ratio_max": 0.25, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": false, "wick_ratio": 0.4}
+    },
+    {
+      "case_id": "both_wicks_present_does_not_match",
+      "description": "Bar range 10.0 with a lower wick of 4.5 and an upper wick of 4.5, which fails both the rejecting-wick and the opposing-wick conditions.",
+      "given_hermes_facts": {"candle.open": 2004.5, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2005.5, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_min": 0.6, "body_to_range_ratio_max": 0.35, "opposing_wick_to_range_ratio_max": 0.25, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": false, "wick_ratio": 0.45, "opposing_wick_ratio": 0.45}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — rejection wick; and PID.md line 242, the 15m rejection wick opening acceptance example B.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults quantifying the wick-size phrase at PID line 114. The measurement basis — wick length relative to bar range — is defined, so per the ambiguity policy in docs/AMBIGUITY-POLICY.md the unset thresholds become declared parameters rather than an escalation. Values 0.6 / 0.35 / 0.25 / 0.5 were set by the architect and carry no evidential support yet."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

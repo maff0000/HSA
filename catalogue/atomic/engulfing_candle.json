@@ -1,0 +1,102 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "engulfing_candle",
+  "strategy_version": "1.0.0",
+  "title": "Engulfing candle",
+  "description": "The body of the evaluated bar spans the body of the prior bar in the opposite direction, by at least body_engulf_ratio_min of the prior body length. The prior bar must itself have a body of at least prior_body_to_range_ratio_min of its range, and the two bars must close in opposite directions.",
+  "thesis": "One bar reversing the entire body of the preceding opposite bar means the prior period's participants are underwater in a single session, which is the measurable form of a completed shift in short-horizon control.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "candle.open", "purpose": "Open of the evaluated bar and of the prior bar.", "timeframe": "15M"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar and of the prior bar.", "timeframe": "15M"},
+    {"field": "candle.high", "purpose": "High of both bars, used when require_full_range_engulf is true.", "timeframe": "15M"},
+    {"field": "candle.low", "purpose": "Low of both bars, used when require_full_range_engulf is true.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "body_engulf_ratio_min",
+      "description": "Minimum body length of the evaluated bar divided by the body length of the prior bar. A value of 1.0 requires the evaluated body to span the prior body exactly; values above 1.0 require it to exceed the prior body.",
+      "type": "number",
+      "default": 1.0,
+      "units": "ratio",
+      "allowed_range": {"minimum": 1.0, "maximum": 3.0}
+    },
+    {
+      "name": "prior_body_to_range_ratio_min",
+      "description": "Minimum body length of the prior bar divided by that bar's total range. Bounding it excludes engulfing a prior bar whose body was too short to represent a position worth reversing.",
+      "type": "number",
+      "default": 0.2,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.0, "maximum": 1.0}
+    },
+    {
+      "name": "require_full_range_engulf",
+      "description": "When true the evaluated bar's high and low must also span the prior bar's high and low, not only its body.",
+      "type": "boolean",
+      "default": false,
+      "units": "none",
+      "allowed_values": [true, false]
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when the prior bar closed below its open and the evaluated bar closes above its open while spanning the prior body; SHORT when the prior bar closed above its open and the evaluated bar closes below its open while spanning the prior body.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when every declared engulfing condition holds on the evaluated bar."},
+      {"name": "direction", "type": "string", "description": "LONG for a bullish engulfing bar, SHORT for a bearish one."},
+      {"name": "engulf_ratio", "type": "number", "description": "Evaluated body length divided by prior body length."},
+      {"name": "reason", "type": "string", "description": "Each engulfing condition, its threshold and whether it held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "bullish_engulfing_matches",
+      "description": "Prior bar body 4.0 down from 2005.0 to 2001.0; evaluated bar body 6.0 up from 2000.5 to 2006.5, spanning it. Engulf ratio 1.5.",
+      "given_hermes_facts": {"candle.open": [2005.0, 2000.5], "candle.close": [2001.0, 2006.5], "candle.high": [2005.5, 2007.0], "candle.low": [2000.5, 2000.0]},
+      "given_parameters": {"body_engulf_ratio_min": 1.0, "prior_body_to_range_ratio_min": 0.2, "require_full_range_engulf": false},
+      "expected_output": {"matched": true, "direction": "LONG", "engulf_ratio": 1.5}
+    },
+    {
+      "case_id": "bearish_engulfing_matches",
+      "description": "Prior bar body 4.0 up from 2001.0 to 2005.0; evaluated bar body 6.0 down from 2006.5 to 2000.5, spanning it.",
+      "given_hermes_facts": {"candle.open": [2001.0, 2006.5], "candle.close": [2005.0, 2000.5], "candle.high": [2005.5, 2007.0], "candle.low": [2000.5, 2000.0]},
+      "given_parameters": {"body_engulf_ratio_min": 1.0, "prior_body_to_range_ratio_min": 0.2, "require_full_range_engulf": false},
+      "expected_output": {"matched": true, "direction": "SHORT", "engulf_ratio": 1.5}
+    },
+    {
+      "case_id": "body_does_not_span_prior_body",
+      "description": "Evaluated body 2.0 against a prior body of 4.0, an engulf ratio of 0.5 which fails the 1.0 threshold.",
+      "given_hermes_facts": {"candle.open": [2005.0, 2001.5], "candle.close": [2001.0, 2003.5], "candle.high": [2005.5, 2004.0], "candle.low": [2000.5, 2001.0]},
+      "given_parameters": {"body_engulf_ratio_min": 1.0, "prior_body_to_range_ratio_min": 0.2, "require_full_range_engulf": false},
+      "expected_output": {"matched": false, "engulf_ratio": 0.5}
+    },
+    {
+      "case_id": "same_direction_bars_do_not_match",
+      "description": "Both bars close above their opens, so no reversal of control occurs whatever the length of the second body.",
+      "given_hermes_facts": {"candle.open": [2001.0, 2000.5], "candle.close": [2005.0, 2006.5], "candle.high": [2005.5, 2007.0], "candle.low": [2000.5, 2000.0]},
+      "given_parameters": {"body_engulf_ratio_min": 1.0, "prior_body_to_range_ratio_min": 0.2, "require_full_range_engulf": false},
+      "expected_output": {"matched": false}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — engulfing, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. Body engulfment rather than full-range engulfment is the default reading; the full-range variant is exposed as require_full_range_engulf so the choice is recorded in the specification instead of being assumed by the implementer."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

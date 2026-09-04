@@ -1,0 +1,85 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "golden_cross",
+  "strategy_version": "1.0.0",
+  "title": "Moving average cross",
+  "description": "The fast moving average crosses the slow moving average on the evaluated timeframe. A cross upward is the golden cross and emits LONG; a cross downward is the death cross and emits SHORT.",
+  "thesis": "A sustained shift of the short-horizon mean above the long-horizon mean marks a regime in which continuation is more likely than mean reversion.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "ma.fast", "purpose": "Fast simple moving average of close, period fast_period.", "timeframe": "4H"},
+    {"field": "ma.slow", "purpose": "Slow simple moving average of close, period slow_period.", "timeframe": "4H"}
+  ],
+  "parameters": [
+    {
+      "name": "fast_period",
+      "description": "Lookback of the fast moving average, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 50,
+      "units": "bars",
+      "allowed_range": {"minimum": 5, "maximum": 200, "step": 1}
+    },
+    {
+      "name": "slow_period",
+      "description": "Lookback of the slow moving average, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 200,
+      "units": "bars",
+      "allowed_range": {"minimum": 20, "maximum": 400, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG on the bar where ma.fast crosses from at or below ma.slow to above it; SHORT on the bar where ma.fast crosses from at or above ma.slow to below it.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True on the bar the cross completes, false on every other bar."},
+      {"name": "direction", "type": "string", "description": "LONG for a cross upward, SHORT for a cross downward."},
+      {"name": "separation", "type": "number", "description": "ma.fast minus ma.slow on the evaluated bar, in instrument price units."},
+      {"name": "reason", "type": "string", "description": "Which of the two cross conditions held or failed on the evaluated bar."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "cross_up_matches",
+      "description": "ma.fast moves from below ma.slow on the prior bar to above it on the evaluated bar.",
+      "given_hermes_facts": {"ma.fast": [1990.0, 2005.0], "ma.slow": [2000.0, 2000.5]},
+      "given_parameters": {"fast_period": 50, "slow_period": 200},
+      "expected_output": {"matched": true, "direction": "LONG", "separation": 4.5}
+    },
+    {
+      "case_id": "cross_down_matches",
+      "description": "ma.fast moves from above ma.slow on the prior bar to below it on the evaluated bar.",
+      "given_hermes_facts": {"ma.fast": [2010.0, 1996.0], "ma.slow": [2000.0, 2000.5]},
+      "given_parameters": {"fast_period": 50, "slow_period": 200},
+      "expected_output": {"matched": true, "direction": "SHORT", "separation": -4.5}
+    },
+    {
+      "case_id": "no_cross_does_not_match",
+      "description": "ma.fast remains below ma.slow across both bars, so no cross completes.",
+      "given_hermes_facts": {"ma.fast": [1990.0, 1995.0], "ma.slow": [2000.0, 2000.5]},
+      "given_parameters": {"fast_period": 50, "slow_period": 200},
+      "expected_output": {"matched": false, "separation": -5.5}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — golden/death cross, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults: fast_period 50 and slow_period 200 are the conventional pairing and were set by the architect, not derived from evidence. They are declared parameters with bounded ranges and are subject to revision under CER evidence."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

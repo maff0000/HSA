@@ -1,0 +1,102 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "volatility_expansion",
+  "strategy_version": "1.0.0",
+  "title": "Volatility expansion",
+  "description": "Short-window average true range divided by long-window average true range is at least expansion_ratio_min, and that condition has held for at least min_bars_expanded consecutive bars.",
+  "thesis": "Realised volatility rising against its own longer-window baseline marks the transition out of balance. The ratio of two average true ranges over the same series is a scale-free statement of that transition.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "atr.short", "purpose": "Average true range over short_atr_period bars.", "timeframe": "5M"},
+    {"field": "atr.long", "purpose": "Average true range over long_atr_period bars, forming the baseline.", "timeframe": "5M"}
+  ],
+  "parameters": [
+    {
+      "name": "short_atr_period",
+      "description": "Lookback of the short-window average true range, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 5,
+      "units": "bars",
+      "allowed_range": {"minimum": 1, "maximum": 50, "step": 1}
+    },
+    {
+      "name": "long_atr_period",
+      "description": "Lookback of the baseline average true range, in bars of the evaluated timeframe. Must exceed short_atr_period for the ratio to express expansion rather than noise.",
+      "type": "integer",
+      "default": 50,
+      "units": "bars",
+      "allowed_range": {"minimum": 5, "maximum": 500, "step": 1}
+    },
+    {
+      "name": "expansion_ratio_min",
+      "description": "Minimum value of atr.short divided by atr.long for the bar to count as expanded. A value of 1.0 means the short window merely matches its baseline.",
+      "type": "number",
+      "default": 1.5,
+      "units": "ratio",
+      "allowed_range": {"minimum": 1.0, "maximum": 10.0}
+    },
+    {
+      "name": "min_bars_expanded",
+      "description": "Number of consecutive bars, ending at the evaluated bar, on which the ratio condition must hold.",
+      "type": "integer",
+      "default": 1,
+      "units": "bars",
+      "allowed_range": {"minimum": 1, "maximum": 50, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["NEUTRAL"],
+    "direction_rule": "Volatility expansion carries no directional content: it states that the market is moving further per bar, not which way. The strategy always emits NEUTRAL, and a chain that needs a direction must take it from another input.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the ratio condition has held for min_bars_expanded consecutive bars."},
+      {"name": "direction", "type": "string", "description": "Always NEUTRAL."},
+      {"name": "expansion_ratio", "type": "number", "description": "atr.short divided by atr.long on the evaluated bar."},
+      {"name": "bars_expanded", "type": "integer", "description": "Consecutive bars ending at the evaluated bar on which the ratio condition held."},
+      {"name": "reason", "type": "string", "description": "The observed ratio, its threshold, the consecutive-bar count and whether each held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "expansion_matches",
+      "description": "Short ATR 12.0 against a baseline of 6.0 gives a ratio of 2.0, clearing the 1.5 threshold on one bar.",
+      "given_hermes_facts": {"atr.short": [12.0], "atr.long": [6.0]},
+      "given_parameters": {"short_atr_period": 5, "long_atr_period": 50, "expansion_ratio_min": 1.5, "min_bars_expanded": 1},
+      "expected_output": {"matched": true, "direction": "NEUTRAL", "expansion_ratio": 2.0, "bars_expanded": 1}
+    },
+    {
+      "case_id": "ratio_below_threshold_does_not_match",
+      "description": "Short ATR 7.0 against a baseline of 6.0 gives a ratio of 7 divided by 6, below the 1.5 threshold.",
+      "given_hermes_facts": {"atr.short": [7.0], "atr.long": [6.0]},
+      "given_parameters": {"short_atr_period": 5, "long_atr_period": 50, "expansion_ratio_min": 1.5, "min_bars_expanded": 1},
+      "expected_output": {"matched": false, "bars_expanded": 0}
+    },
+    {
+      "case_id": "persistence_requirement_not_met_does_not_match",
+      "description": "The ratio clears the threshold on the evaluated bar only, but min_bars_expanded requires three consecutive bars.",
+      "given_hermes_facts": {"atr.short": [6.0, 6.5, 12.0], "atr.long": [6.0, 6.0, 6.0]},
+      "given_parameters": {"short_atr_period": 5, "long_atr_period": 50, "expansion_ratio_min": 1.5, "min_bars_expanded": 3},
+      "expected_output": {"matched": false, "expansion_ratio": 2.0, "bars_expanded": 1}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — volatility expansion, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. This entry is deliberately directionless and is the catalogue's worked example of an atomic strategy that emits NEUTRAL only; a chain composing it must take direction from a different input."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

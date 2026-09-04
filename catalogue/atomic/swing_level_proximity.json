@@ -1,0 +1,111 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "swing_level_proximity",
+  "strategy_version": "1.0.0",
+  "title": "Proximity to swing high or swing low",
+  "description": "The close of the evaluated bar sits within proximity_atr_multiple of ATR of the most recent confirmed swing high or swing low, measured in price units. The side tested is controlled by level_side.",
+  "thesis": "Prior swing extremes are where resting orders accumulate. Distance to such a level, scaled by prevailing volatility, is the measurable form of the location question that price-action traders answer by eye.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "swing.high", "purpose": "Price of the most recent confirmed swing high, using swing_lookback bars either side of the pivot.", "timeframe": "1H"},
+    {"field": "swing.low", "purpose": "Price of the most recent confirmed swing low, using swing_lookback bars either side of the pivot.", "timeframe": "1H"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar.", "timeframe": "1H"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale the proximity tolerance to prevailing volatility.", "timeframe": "1H"}
+  ],
+  "parameters": [
+    {
+      "name": "proximity_atr_multiple",
+      "description": "Maximum distance between the close and the tested swing level, as a multiple of ATR. This is the measurable replacement for the discretionary proximity phrase at PID.md line 115.",
+      "type": "number",
+      "default": 0.5,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.05, "maximum": 3.0}
+    },
+    {
+      "name": "swing_lookback",
+      "description": "Number of bars required either side of a pivot before it is treated as a confirmed swing point.",
+      "type": "integer",
+      "default": 20,
+      "units": "bars",
+      "allowed_range": {"minimum": 3, "maximum": 200, "step": 1}
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used to scale the proximity tolerance, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    },
+    {
+      "name": "level_side",
+      "description": "Which swing level to test: HIGH tests the swing high only, LOW tests the swing low only, EITHER tests both and reports whichever is within tolerance.",
+      "type": "enum",
+      "default": "EITHER",
+      "units": "none",
+      "allowed_values": ["HIGH", "LOW", "EITHER"]
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "SHORT when the close is within tolerance of swing.high, since the level is overhead supply; LONG when the close is within tolerance of swing.low. When level_side is EITHER and both levels are within tolerance, the level with the lesser absolute distance determines direction.",
+    "inversion_allowed": true
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the close is within the declared tolerance of a tested swing level."},
+      {"name": "direction", "type": "string", "description": "SHORT at a swing high, LONG at a swing low."},
+      {"name": "level_price", "type": "number", "description": "Price of the swing level the match was measured against."},
+      {"name": "distance_atr", "type": "number", "description": "Absolute distance between the close and that level, divided by ATR."},
+      {"name": "reason", "type": "string", "description": "Which level was tested, the tolerance in ATR multiples and the observed distance."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "close_within_tolerance_of_swing_high_matches",
+      "description": "Close is 3.0 below swing.high with an ATR of 8.0, a distance of 0.375 ATR, inside the 0.5 tolerance.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2047.0, "atr": 8.0},
+      "given_parameters": {"proximity_atr_multiple": 0.5, "swing_lookback": 20, "atr_period": 14, "level_side": "EITHER"},
+      "expected_output": {"matched": true, "direction": "SHORT", "level_price": 2050.0, "distance_atr": 0.375}
+    },
+    {
+      "case_id": "close_within_tolerance_of_swing_low_matches",
+      "description": "Close is 2.0 above swing.low with an ATR of 8.0, a distance of 0.25 ATR, inside the 0.5 tolerance.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 1992.0, "atr": 8.0},
+      "given_parameters": {"proximity_atr_multiple": 0.5, "swing_lookback": 20, "atr_period": 14, "level_side": "EITHER"},
+      "expected_output": {"matched": true, "direction": "LONG", "level_price": 1990.0, "distance_atr": 0.25}
+    },
+    {
+      "case_id": "close_outside_tolerance_does_not_match",
+      "description": "Close is 20.0 from the closer level with an ATR of 8.0, a distance of 2.5 ATR, outside the 0.5 tolerance.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2030.0, "atr": 8.0},
+      "given_parameters": {"proximity_atr_multiple": 0.5, "swing_lookback": 20, "atr_period": 14, "level_side": "EITHER"},
+      "expected_output": {"matched": false, "distance_atr": 2.5}
+    },
+    {
+      "case_id": "level_side_low_ignores_the_swing_high",
+      "description": "Close sits within tolerance of swing.high, but level_side is LOW so the swing high is not tested.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2047.0, "atr": 8.0},
+      "given_parameters": {"proximity_atr_multiple": 0.5, "swing_lookback": 20, "atr_period": 14, "level_side": "LOW"},
+      "expected_output": {"matched": false, "level_price": 1990.0, "distance_atr": 7.125}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — proximity to swing high/low; quantifies the proximity example at PID.md line 115.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. Distance is scaled by ATR rather than fixed in pips so the same specification transfers across volatility regimes without re-tuning. The 0.5 default carries no evidential support yet."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

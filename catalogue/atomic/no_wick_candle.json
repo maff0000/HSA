@@ -1,0 +1,113 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "no_wick_candle",
+  "strategy_version": "1.0.0",
+  "title": "No-wick directional candle",
+  "description": "A bar whose body occupies at least body_to_range_ratio_min of the bar range and whose upper and lower wicks are each at most wick_to_range_ratio_max of the bar range. The bar range must also be at least min_range_atr_multiple of ATR.",
+  "thesis": "A bar that opens at one extreme and closes at the other was directional for its whole duration, with no return to the opening area. That absence of retracement inside the bar is the measurable trace of one-sided participation.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "candle.open", "purpose": "Open of the evaluated bar.", "timeframe": "15M"},
+    {"field": "candle.high", "purpose": "High of the evaluated bar, used for the upper wick.", "timeframe": "15M"},
+    {"field": "candle.low", "purpose": "Low of the evaluated bar, used for the lower wick.", "timeframe": "15M"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar.", "timeframe": "15M"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale the minimum bar range.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "wick_to_range_ratio_max",
+      "description": "Maximum length of either wick divided by the total bar range. This is the measurable definition of no wick: a wick is permitted up to this fraction and no further.",
+      "type": "number",
+      "default": 0.1,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.0, "maximum": 0.3}
+    },
+    {
+      "name": "body_to_range_ratio_min",
+      "description": "Minimum body length, the absolute difference of open and close, divided by the total bar range.",
+      "type": "number",
+      "default": 0.8,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.5, "maximum": 1.0}
+    },
+    {
+      "name": "min_range_atr_multiple",
+      "description": "Minimum total bar range as a multiple of ATR, so a bar too compressed to express direction cannot satisfy the ratios by rounding.",
+      "type": "number",
+      "default": 0.5,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.0, "maximum": 5.0}
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used by min_range_atr_multiple, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when candle.close is above candle.open; SHORT when candle.close is below candle.open. A bar whose close equals its open cannot satisfy body_to_range_ratio_min and therefore never matches.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the body and both wick conditions hold on the evaluated bar."},
+      {"name": "direction", "type": "string", "description": "LONG for an up bar, SHORT for a down bar."},
+      {"name": "body_ratio", "type": "number", "description": "Body length divided by the total bar range."},
+      {"name": "upper_wick_ratio", "type": "number", "description": "Upper wick length divided by the total bar range."},
+      {"name": "lower_wick_ratio", "type": "number", "description": "Lower wick length divided by the total bar range."},
+      {"name": "reason", "type": "string", "description": "Each ratio condition, its threshold and whether it held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "up_marubozu_matches",
+      "description": "Bar range 10.0, body 9.0 (0.9), upper wick 0.5 (0.05), lower wick 0.5 (0.05), ATR 8.0.",
+      "given_hermes_facts": {"candle.open": 2000.5, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2009.5, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_max": 0.1, "body_to_range_ratio_min": 0.8, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "LONG", "body_ratio": 0.9, "upper_wick_ratio": 0.05, "lower_wick_ratio": 0.05}
+    },
+    {
+      "case_id": "down_marubozu_matches",
+      "description": "Bar range 10.0, body 9.0 (0.9) closing downward, upper wick 0.5, lower wick 0.5, ATR 8.0.",
+      "given_hermes_facts": {"candle.open": 2009.5, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2000.5, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_max": 0.1, "body_to_range_ratio_min": 0.8, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "SHORT", "body_ratio": 0.9, "upper_wick_ratio": 0.05, "lower_wick_ratio": 0.05}
+    },
+    {
+      "case_id": "upper_wick_over_threshold_does_not_match",
+      "description": "Bar range 10.0 with an upper wick of 3.0 (0.3), which fails the 0.1 threshold.",
+      "given_hermes_facts": {"candle.open": 2000.5, "candle.high": 2010.0, "candle.low": 2000.0, "candle.close": 2007.0, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_max": 0.1, "body_to_range_ratio_min": 0.8, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": false, "upper_wick_ratio": 0.3, "body_ratio": 0.65}
+    },
+    {
+      "case_id": "range_below_atr_floor_does_not_match",
+      "description": "Ratios all pass but the bar range of 1.0 is 0.125 of an ATR of 8.0, failing the 0.5 ATR floor.",
+      "given_hermes_facts": {"candle.open": 2000.05, "candle.high": 2001.0, "candle.low": 2000.0, "candle.close": 2000.95, "atr": 8.0},
+      "given_parameters": {"wick_to_range_ratio_max": 0.1, "body_to_range_ratio_min": 0.8, "min_range_atr_multiple": 0.5, "atr_period": 14},
+      "expected_output": {"matched": false, "body_ratio": 0.9}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — no-wick candle; and PID.md line 242, the no-wick directional confirmation step of acceptance example B.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. No wick is a proportion, not an absolute: a bar with a wick of zero length is vanishingly rare, so the term is expressed as wick_to_range_ratio_max with an architect-set default of 0.1 and no evidential support yet."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

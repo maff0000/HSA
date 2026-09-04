@@ -1,0 +1,86 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "range_breakout",
+  "strategy_version": "1.0.0",
+  "title": "Range breakout",
+  "description": "The close of the evaluated bar sits beyond the high or the low of the preceding consolidation range by at least break_margin_ratio of the range height.",
+  "thesis": "A close outside a consolidation range by more than the declared margin indicates that accumulated order flow has resolved in one direction rather than oscillating within the range.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "range.high", "purpose": "Highest high of the preceding range_lookback bars, excluding the evaluated bar.", "timeframe": "5M"},
+    {"field": "range.low", "purpose": "Lowest low of the preceding range_lookback bars, excluding the evaluated bar.", "timeframe": "5M"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar.", "timeframe": "5M"}
+  ],
+  "parameters": [
+    {
+      "name": "range_lookback",
+      "description": "Number of bars used to define the consolidation range.",
+      "type": "integer",
+      "default": 12,
+      "units": "bars",
+      "allowed_range": {"minimum": 3, "maximum": 96, "step": 1}
+    },
+    {
+      "name": "break_margin_ratio",
+      "description": "Minimum distance the close must sit beyond the range boundary, as a fraction of the range height (range.high minus range.low). This is the measurable replacement for an unquantified judgement of breakout quality.",
+      "type": "number",
+      "default": 0.1,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.0, "maximum": 1.0}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when candle.close is at least range.high plus break_margin_ratio times the range height; SHORT when candle.close is at or below range.low minus break_margin_ratio times the range height.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the close clears a range boundary by the required margin."},
+      {"name": "direction", "type": "string", "description": "LONG for a break above range.high, SHORT for a break below range.low."},
+      {"name": "break_distance_ratio", "type": "number", "description": "Distance of the close beyond the breached boundary divided by the range height."},
+      {"name": "reason", "type": "string", "description": "Which boundary was tested, the required margin and the observed distance."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "break_above_matches",
+      "description": "Range height is 10.0; the close sits 2.0 above range.high, which is 0.2 of the range height and clears the 0.1 margin.",
+      "given_hermes_facts": {"range.high": 2010.0, "range.low": 2000.0, "candle.close": 2012.0},
+      "given_parameters": {"range_lookback": 12, "break_margin_ratio": 0.1},
+      "expected_output": {"matched": true, "direction": "LONG", "break_distance_ratio": 0.2}
+    },
+    {
+      "case_id": "break_below_matches",
+      "description": "Range height is 10.0; the close sits 1.5 below range.low, which is 0.15 of the range height and clears the 0.1 margin.",
+      "given_hermes_facts": {"range.high": 2010.0, "range.low": 2000.0, "candle.close": 1998.5},
+      "given_parameters": {"range_lookback": 12, "break_margin_ratio": 0.1},
+      "expected_output": {"matched": true, "direction": "SHORT", "break_distance_ratio": 0.15}
+    },
+    {
+      "case_id": "margin_not_cleared_does_not_match",
+      "description": "The close sits 0.5 above range.high, which is 0.05 of the range height and fails the 0.1 margin.",
+      "given_hermes_facts": {"range.high": 2010.0, "range.low": 2000.0, "candle.close": 2010.5},
+      "given_parameters": {"range_lookback": 12, "break_margin_ratio": 0.1},
+      "expected_output": {"matched": false, "break_distance_ratio": 0.05}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — breakout, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set default: break_margin_ratio 0.1 quantifies the otherwise discretionary breakout-quality phrase at PID line 118. The measurement basis — distance beyond the boundary relative to range height — is defined; only the threshold was architect-set, so this is a declared parameter rather than an escalation."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

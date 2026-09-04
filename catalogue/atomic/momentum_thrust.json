@@ -1,0 +1,111 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "momentum_thrust",
+  "strategy_version": "1.0.0",
+  "title": "Momentum thrust",
+  "description": "Net close-to-close displacement over the preceding lookback_bars is at least displacement_atr_multiple_min of ATR in one direction, while the counter-move against that direction inside the same window stays at or below adverse_excursion_atr_multiple_max of ATR.",
+  "thesis": "Directional travel that is a multiple of prevailing volatility, achieved without a comparable counter-move, distinguishes sustained participation from drift that happens to end higher.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "candle.close", "purpose": "Close series over the lookback window, used for net displacement.", "timeframe": "15M"},
+    {"field": "candle.high", "purpose": "High series over the lookback window, used for adverse excursion against a SHORT displacement.", "timeframe": "15M"},
+    {"field": "candle.low", "purpose": "Low series over the lookback window, used for adverse excursion against a LONG displacement.", "timeframe": "15M"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale displacement and adverse excursion.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "lookback_bars",
+      "description": "Number of bars over which net displacement is measured, ending at the evaluated bar.",
+      "type": "integer",
+      "default": 5,
+      "units": "bars",
+      "allowed_range": {"minimum": 1, "maximum": 100, "step": 1}
+    },
+    {
+      "name": "displacement_atr_multiple_min",
+      "description": "Minimum absolute net close-to-close displacement across the window, as a multiple of ATR. This is the measurable replacement for the discretionary trend-quality phrase at PID.md line 116.",
+      "type": "number",
+      "default": 1.5,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.1, "maximum": 10.0}
+    },
+    {
+      "name": "adverse_excursion_atr_multiple_max",
+      "description": "Maximum counter-move inside the window against the displacement direction, as a multiple of ATR, measured from the running extreme in the direction of travel.",
+      "type": "number",
+      "default": 1.0,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.0, "maximum": 10.0}
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used to scale both thresholds, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when net displacement across the window is positive and clears the threshold; SHORT when it is negative and clears the threshold in absolute terms.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when displacement clears its threshold and adverse excursion stays within its bound."},
+      {"name": "direction", "type": "string", "description": "LONG for upward displacement, SHORT for downward displacement."},
+      {"name": "displacement_atr", "type": "number", "description": "Absolute net close-to-close displacement divided by ATR."},
+      {"name": "adverse_excursion_atr", "type": "number", "description": "Counter-move against the displacement direction divided by ATR."},
+      {"name": "reason", "type": "string", "description": "Both measured quantities, their thresholds and whether each held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "upward_thrust_matches",
+      "description": "Close moves 2000.0 to 2016.0 over five bars, 16.0 or 2.0 ATR at an ATR of 8.0, with a counter-move of 2.0 or 0.25 ATR.",
+      "given_hermes_facts": {"candle.close": [2000.0, 2004.0, 2002.0, 2010.0, 2016.0], "candle.high": [2001.0, 2005.0, 2004.0, 2011.0, 2016.5], "candle.low": [1999.5, 2003.0, 2002.0, 2009.0, 2010.0], "atr": 8.0},
+      "given_parameters": {"lookback_bars": 5, "displacement_atr_multiple_min": 1.5, "adverse_excursion_atr_multiple_max": 1.0, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "LONG", "displacement_atr": 2.0, "adverse_excursion_atr": 0.25}
+    },
+    {
+      "case_id": "downward_thrust_matches",
+      "description": "Close moves 2016.0 to 2000.0 over five bars, an absolute displacement of 2.0 ATR, with a counter-move of 0.25 ATR.",
+      "given_hermes_facts": {"candle.close": [2016.0, 2012.0, 2014.0, 2006.0, 2000.0], "candle.high": [2016.5, 2013.0, 2014.0, 2007.0, 2006.0], "candle.low": [2015.0, 2011.0, 2012.0, 2005.0, 1999.5], "atr": 8.0},
+      "given_parameters": {"lookback_bars": 5, "displacement_atr_multiple_min": 1.5, "adverse_excursion_atr_multiple_max": 1.0, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "SHORT", "displacement_atr": 2.0, "adverse_excursion_atr": 0.25}
+    },
+    {
+      "case_id": "displacement_below_threshold_does_not_match",
+      "description": "Net displacement of 4.0 over five bars is 0.5 ATR, below the 1.5 threshold.",
+      "given_hermes_facts": {"candle.close": [2000.0, 2001.0, 2000.5, 2003.0, 2004.0], "candle.high": [2001.0, 2002.0, 2001.0, 2003.5, 2004.5], "candle.low": [1999.5, 2000.5, 2000.0, 2002.5, 2003.5], "atr": 8.0},
+      "given_parameters": {"lookback_bars": 5, "displacement_atr_multiple_min": 1.5, "adverse_excursion_atr_multiple_max": 1.0, "atr_period": 14},
+      "expected_output": {"matched": false, "displacement_atr": 0.5}
+    },
+    {
+      "case_id": "adverse_excursion_over_bound_does_not_match",
+      "description": "Displacement of 2.0 ATR clears its threshold but the counter-move of 10.0 is 1.25 ATR, above the 1.0 bound.",
+      "given_hermes_facts": {"candle.close": [2000.0, 2014.0, 2004.0, 2010.0, 2016.0], "candle.high": [2001.0, 2014.5, 2014.0, 2011.0, 2016.5], "candle.low": [1999.5, 2013.0, 2004.0, 2009.0, 2010.0], "atr": 8.0},
+      "given_parameters": {"lookback_bars": 5, "displacement_atr_multiple_min": 1.5, "adverse_excursion_atr_multiple_max": 1.0, "atr_period": 14},
+      "expected_output": {"matched": false, "displacement_atr": 2.0, "adverse_excursion_atr": 1.25}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — momentum; quantifies the trend-quality example at PID.md line 116.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. The trend-quality phrase at PID line 116 has a defined measurement basis once stated as displacement relative to volatility, so it becomes declared parameters rather than an escalation. Two quantities are needed because displacement alone does not separate sustained travel from a round trip that ends higher."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

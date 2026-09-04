@@ -1,0 +1,340 @@
+# Composition doctrine
+
+How HSA combines atomic strategies into chains, and why it combines them the
+way it does. This is durable authority: a fresh HSA boot loads this document
+and does not need the reasoning re-explained (PID lines 202-218).
+
+Its subject is PID lines 57-97. The machine-enforced half lives in
+`contracts/chain.schema.json` and `hsa/semantics.py`; this document is the
+half that explains *why*, and states the rules that are doctrine rather than
+code.
+
+---
+
+## 1. Atomic strategies never call or import each other
+
+PID line 59. This is the load-bearing rule of the whole model, and everything
+below is downstream of it.
+
+An atomic strategy is small, self-contained, independently testable,
+deterministic, execution-blind, unaware of other strategies, and mechanically
+driven by HERMES facts (PID lines 45-53). Every one of those properties is
+lost the moment one strategy may consult another:
+
+- **Independently testable** stops being true. A strategy that consults a peer
+  can only be tested against that peer's behaviour, so its
+  `deterministic_test_cases` no longer pin its own logic.
+- **Evidence stops being attributable.** CER records evidence against
+  `strategy_id` plus `strategy_version` (PID lines 162-171). If `retest`
+  internally consults `structure_break`, then evidence recorded against
+  `retest` is really evidence about a pair, and promoting one version silently
+  re-promotes a hidden dependency that no gate examined.
+- **Versioning stops being safe.** Promoted versions are immutable (PID lines
+  185-189). A hidden edge from A to B means a new version of B changes the
+  behaviour of the frozen A, which is precisely the in-place mutation the PID
+  forbids.
+- **Reuse stops being free.** An atomic that carries a dependency can only be
+  composed where its dependency is also wanted.
+
+So composition is a **separate model applied from the outside** (PID line 61).
+A chain reads normalised atomic outputs and combines them. The atomics never
+learn that a chain exists.
+
+The prohibition is structural, not advisory: `atomic_strategy.schema.json`
+provides no property through which another strategy could be named and sets
+`additionalProperties: false`, so a document that invents one fails
+validation. See `contracts/README.md`.
+
+**The line this puts on catalogue authoring.** An atomic strategy may consume
+any market fact HERMES publishes, including structural ones. It may not
+consume the *output of another HSA strategy*. `level_retest` in the catalogue
+is the worked example: it needs to know a level was broken, and it takes
+`level.recent_break_price` from HERMES rather than reading
+`structure_break`'s output. A chain that wants those two to agree composes
+them; it does not wire them together.
+
+---
+
+## 2. What normalisation buys
+
+Every atomic declares an `output_contract` with a `signal_type` of `BOOLEAN`,
+`STATE` or `SCORE`, a field list, and a mandatory `reason_field`
+(`common.defs.json`). That shared shape is what lets a chain treat a
+rejection wick and a moving-average cross as the same kind of thing without
+knowing anything about either.
+
+The mandatory `reason_field` is what makes the chain's own explanation
+possible. A chain does not invent an explanation; it assembles one out of the
+reasons its components already emit.
+
+---
+
+## 3. The canonical primitives
+
+Exactly four, per PID lines 63-68. The enum in `chain.schema.json` is closed:
+adding a fifth is a PID change, not a document change.
+
+Throughout, *required input* means an input without `optional: true`.
+
+### `ALL`
+
+Every required input must match **on the same evaluation**, in the chain's
+resolved direction.
+
+- Order is not significant. An input that matched three bars ago has not
+  matched now, unless the chain's own `persistence` says a match stays
+  asserted for a number of bars — in which case that persistence, not the
+  input, is what is still holding.
+- Direction: every required input must agree once `INHERIT` and `EITHER` are
+  resolved. Disagreement is a non-match, and the reason must say which input
+  disagreed.
+- Optional inputs are evaluated and reported, and their result never blocks a
+  match.
+
+### `ANY`
+
+At least one required input must match on the evaluation. The matching input
+carries the chain's direction; where more than one matches, the chain's
+`direction_rule` must say how direction is resolved.
+
+- `ANY` is the one primitive where a single input causes a match on its own.
+  That is why an `optional` input under `ANY` is rejected: see §6.
+- Non-match must still report every input, since "none of these fired" is only
+  auditable if the reader can see what was tried.
+
+### `SEQUENCE`
+
+Required inputs must match in ascending `sequence_index` order, each at or
+after the one before, and the whole ordered set must complete inside
+`timing.sequence_window`.
+
+- `sequence_index` is 1-based and must be contiguous with no duplicates —
+  enforced by `hsa/semantics.py`, because a gap or a repeat leaves the order
+  undetermined and JSON Schema cannot see it.
+- The window is mandatory for `SEQUENCE` (enforced by the schema). A sequence
+  with no window is not a sequence, it is a claim that two things happened at
+  some point, which is not testable.
+- Partial progress is state. A `SEQUENCE` chain that has seen step 1 and is
+  waiting for step 2 is in a named state, and `state_semantics` must name it
+  and say what resets it.
+- An optional step is skipped without breaking the ordering: if steps are
+  1, 2 (optional), 3, then 1 followed by 3 inside the window is a match.
+
+### `CONTEXT_TRIGGER`
+
+A higher-timeframe `CONTEXT` input must be **holding** at the moment a
+lower-timeframe `TRIGGER` input **fires**.
+
+This is the only primitive that distinguishes a *condition that persists* from
+an *event that occurs*, and it is the reason the primitive exists separately
+from `ALL`.
+
+- The schema requires both roles to be present. `hsa/semantics.py` additionally
+  requires the CONTEXT input's timeframe to be **strictly higher** than the
+  TRIGGER's — a 5M context over a 4H trigger validates structurally while
+  inverting the entire model of PID lines 84-97.
+- "Holding" means the context's most recent evaluation on its own timeframe is
+  still a match. A 4H context is evaluated eight times fewer than a 5M trigger;
+  the chain reads the context's latched result, which is why a
+  `CONTEXT_TRIGGER` chain is nearly always stateful.
+- Neither the CONTEXT nor the TRIGGER input may be `optional`. The primitive is
+  *defined* as the conjunction of those two roles.
+- Direction is normally taken from the context, with the trigger required to
+  agree; whichever way a chain resolves it, `direction_rule` must say so.
+
+---
+
+## 4. What a chain must preserve
+
+PID lines 70-80, in order. Each is a required property of `chain.schema.json`,
+so a chain that omits one does not validate.
+
+| Preserved | Where it lives | Why it cannot be dropped |
+| --- | --- | --- |
+| **Component identity and version** | `inputs[].strategy_id` + `strategy_version`, both required | Evidence in CER is recorded against id *and* version. A chain that pinned only an id would silently change meaning when a new version was promoted. |
+| **State** | `state_semantics` | A latched context or a half-complete sequence is state. Undeclared state is state HELIOS invents for itself. |
+| **Direction** | `direction_semantics` on the chain and per input | Composing a LONG context with a SHORT trigger is a non-match, not a match. That is only decidable if both express direction. |
+| **Timing / sequence** | `timing`, `inputs[].sequence_index` | "Both happened" and "one happened then the other" are different strategies. |
+| **Persistence** | `persistence` | How long a match stays asserted is part of the strategy, not an implementation choice for FORGE. |
+| **Expiry** | `expiry` | An unconsumed match or a latched context that never goes stale is a leak. If `expires` is true the schema forces a bar count and a timeframe: an expiry with no horizon is exactly the discretionary language HSA refuses. |
+| **Timeframe semantics** | `timeframe_roles`, `inputs[].timeframe_role` + `timeframe` | See §5. |
+| **Provenance** | `provenance` | An artefact whose origin cannot be named is not governed (PID line 145). |
+| **Explicit reason for match AND non-match** | `explanation_contract` | See below. |
+
+### The reason requirement is the strictest of them
+
+PID line 80 asks for an explicit reason for match **and** non-match.
+`explanation_contract` sets `emit_reason_on_match`,
+`emit_reason_on_non_match` and `per_input_evaluation_reported` all to
+`const: true`, so no chain can be authored that reports a bare boolean.
+
+A non-match with no reason is unauditable, and unauditable output cannot be
+governed by evidence. In practice the non-match reason is the more valuable
+of the two: it is what tells a researcher whether a strategy is dormant
+because its conditions are absent (PID line 195: dormancy is not failure) or
+because it is broken.
+
+Attribution must be **per input**, using each atomic's own `reason_field`. "The
+chain did not match" is not a reason; "context held, trigger did not fire —
+break_distance_ratio 0.05 against a required 0.1" is.
+
+---
+
+## 5. The multi-timeframe semantic role model
+
+PID lines 84-97. The initial GOLD pattern is:
+
+| Role | Question it answers | Initial GOLD mapping |
+| --- | --- | --- |
+| `CONTEXT` | What regime are we in? | 4H |
+| `LOCATION` | Are we somewhere that matters? | 1H |
+| `CONFIRMATION` | Has the idea proved itself? | 15M |
+| `TRIGGER` | Is it happening now? | 5M |
+
+**The roles are canonical. The timeframes are not.** PID line 93 states this
+directly, and line 95 requires 1D/4H/1H/15M and 1H/15M/5M/1M to be equally
+expressible. So:
+
+- The **role** enum is closed in `common.defs.json`. `CONTEXT`, `LOCATION`,
+  `CONFIRMATION` and `TRIGGER` are the vocabulary.
+- The **mapping** is per chain, declared in `timeframe_roles`. Nothing in HSA
+  hard-codes 4H to `CONTEXT`.
+- A chain need not use all four roles. Acceptance example A uses two.
+- `hsa/semantics.py` requires each input's declared `timeframe` to equal the
+  timeframe its role maps to, and requires every role an input uses to appear
+  in the role model. A document that says `CONTEXT` is 4H in one place and 15M
+  in another states two different things about one role.
+
+PID line 97 is worth restating because it constrains how this template may be
+used: it is **a hypothesis structure to be empirically validated, not doctrine
+that guarantees edge.** A chain that assigns roles correctly has been
+specified correctly. It has not been shown to work. That is what CER evidence
+gates are for.
+
+---
+
+## 6. `optional` inputs
+
+`optional: true` on a chain input exists for one named requirement: the
+*optional lower-timeframe trigger* of PID line 242, acceptance example B.
+
+**What it means.** An optional input is evaluated, and its result is reported
+in the explanation, but its non-match does not prevent the chain matching. It
+adds information; it does not gate.
+
+**What it can never be.** *An optional input can never be the sole cause of a
+match.* If the only reason a chain matched is that an optional input matched,
+then that input was not optional — it was the strategy. `hsa/semantics.py`
+enforces this in four forms:
+
+1. A chain whose single input is optional is rejected: nothing is required to
+   cause a match.
+2. A chain whose inputs are *all* optional is rejected, for the same reason.
+3. Any optional input under `ANY` is rejected. `ANY` matches when one input
+   matches, so an optional input there is by construction able to be the sole
+   cause.
+4. The `CONTEXT` or `TRIGGER` input of a `CONTEXT_TRIGGER` chain may not be
+   optional, since the primitive is defined as those two roles together.
+
+Under `ALL` and `SEQUENCE`, an optional input alongside at least one required
+input is legitimate and is the intended use.
+
+---
+
+## 7. Chains are flat in v1
+
+PID line 82: *prefer atomic-strategy inputs to chains in v1; do not create
+recursive chain-of-chain complexity unless explicitly authorised.*
+
+HSA reads that strictly, and the PL has ratified the strict reading. A chain
+is **exactly one top-level primitive whose inputs are atomic references
+only**. There is no operator nesting. `ALL(context, ANY(trigger_a,
+trigger_b))` cannot be expressed and must be split into separately governed
+chains.
+
+This is enforced by the shape of `chain.schema.json`, not by convention: there
+is no reusable node definition, no self-`$ref`, and no `chain_id` inside an
+input, so a nested node is unrepresentable rather than discouraged.
+
+### Why the strict reading
+
+- **It is what the PID says.** The permissive reading — "allow nesting, just
+  prefer not to" — needs the words *unless explicitly authorised* to mean
+  something other than what they say.
+- **Both acceptance examples are flat.** PID lines 234-242 describe a
+  context-plus-trigger chain and an ordered three-step sequence. Neither needs
+  nesting. A restriction that costs nothing on the actual requirements is
+  cheap.
+- **Evidence stays attributable.** A flat chain has one primitive and a list
+  of versioned atomics, so a CER record against `chain_id` + `chain_version`
+  describes something a human can hold in their head. A nested tree does not
+  decompose that way.
+- **Relaxing later is additive; withdrawing later is not.** Permitting a
+  nested node as an *alternative* kind of input in some future version would
+  not invalidate a single document written today. Allowing recursion now and
+  withdrawing it later would break every document that used it. When a
+  restriction is cheap to lift and expensive to impose retroactively, impose
+  it first.
+
+### Working within it
+
+Where an expression genuinely needs nesting, split it:
+
+- `ALL(context, ANY(trigger_a, trigger_b))` becomes a chain `ANY(trigger_a,
+  trigger_b)` and — since a chain cannot consume a chain in v1 — either a
+  separately governed strategy whose triggers are folded into one atomic, or
+  two chains `ALL(context, trigger_a)` and `ALL(context, trigger_b)` governed
+  and evidenced separately.
+
+The second form is usually the better answer anyway: it produces two
+independently evidenced specialist strategies rather than one compound whose
+performance is an average of two different behaviours. That is the portfolio
+doctrine of PID lines 191-198 arriving by a different road.
+
+If a case appears where the restriction genuinely blocks a required strategy,
+that is a PID escalation — *explicitly authorised* is the PID's own escape
+hatch — and not something to route around in a document.
+
+---
+
+## 8. Where the rules are enforced
+
+| Rule | Enforced by |
+| --- | --- |
+| Only the four canonical primitives | `chain.schema.json` (closed enum) |
+| Inputs are atomic references only; no nesting | `chain.schema.json` (no node `$def`, no self-`$ref`) |
+| Identity is id + version, both required | `chain.schema.json` |
+| Reason on match and non-match, per input | `chain.schema.json` (`const: true`) |
+| `SEQUENCE` has a window and per-input indices | `chain.schema.json` (conditional) |
+| `CONTEXT_TRIGGER` has both roles present | `chain.schema.json` (conditional) |
+| `input_id` unique within a chain | `hsa/semantics.py` |
+| `sequence_index` contiguous from 1, no duplicates | `hsa/semantics.py` |
+| `sequence_index` absent on a non-`SEQUENCE` chain | `hsa/semantics.py` |
+| An optional input is never the sole cause of a match | `hsa/semantics.py` |
+| CONTEXT timeframe strictly above TRIGGER | `hsa/semantics.py` |
+| Input timeframe agrees with the role model | `hsa/semantics.py` |
+| Every referenced atomic resolves in the catalogue | `hsa/semantics.py` |
+| Package and embedded chain agree | `hsa/semantics.py` |
+| Package embeds every atomic its chain names | `hsa/semantics.py` |
+| Atomic HERMES needs carried up to package level | `hsa/semantics.py` |
+
+Run both halves over a document with:
+
+```bash
+hsa chain path/to/chain.json
+```
+
+Structural validation runs first, semantic second. A document that passes
+`hsa validate` can still fail `hsa chain`; that difference is the whole reason
+`hsa/semantics.py` exists.
+
+---
+
+## Related doctrine
+
+- `contracts/README.md` — the frozen contract set and its structural
+  prohibitions.
+- `catalogue/README.md` — the atomic strategy catalogue and its authoring
+  rules.
+- `docs/AMBIGUITY-POLICY.md` — when a discretionary term becomes a declared
+  parameter and when it must be escalated instead.

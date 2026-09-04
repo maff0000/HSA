@@ -1,0 +1,113 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "structure_break",
+  "strategy_version": "1.0.0",
+  "title": "Structure break",
+  "description": "The close of the evaluated bar sits beyond the most recent confirmed swing high or swing low by at least break_atr_multiple_min of ATR. When require_body_close_beyond is true the close itself must clear the level; when false a high or low piercing the level satisfies it.",
+  "thesis": "A confirmed swing extreme is the boundary of the prevailing structure. Trading beyond it by more than prevailing volatility marks the point at which the previous structural high or low has stopped holding.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "swing.high", "purpose": "Price of the most recent confirmed swing high before the evaluated bar.", "timeframe": "1H"},
+    {"field": "swing.low", "purpose": "Price of the most recent confirmed swing low before the evaluated bar.", "timeframe": "1H"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar.", "timeframe": "1H"},
+    {"field": "candle.high", "purpose": "High of the evaluated bar, used when require_body_close_beyond is false.", "timeframe": "1H"},
+    {"field": "candle.low", "purpose": "Low of the evaluated bar, used when require_body_close_beyond is false.", "timeframe": "1H"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale the required break distance.", "timeframe": "1H"}
+  ],
+  "parameters": [
+    {
+      "name": "break_atr_multiple_min",
+      "description": "Minimum distance beyond the swing level, as a multiple of ATR, before the level counts as broken. Bounding it away from zero stops a break of one tick counting the same as a break that travels an ATR beyond the level.",
+      "type": "number",
+      "default": 0.25,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.0, "maximum": 5.0}
+    },
+    {
+      "name": "swing_lookback",
+      "description": "Number of bars required either side of a pivot before it is treated as a confirmed swing point.",
+      "type": "integer",
+      "default": 20,
+      "units": "bars",
+      "allowed_range": {"minimum": 3, "maximum": 200, "step": 1}
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used to scale the required break distance, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    },
+    {
+      "name": "require_body_close_beyond",
+      "description": "When true the close must clear the level by the required distance. When false the bar high or low clearing it satisfies the condition.",
+      "type": "boolean",
+      "default": true,
+      "units": "none",
+      "allowed_values": [true, false]
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when the level broken is swing.high; SHORT when the level broken is swing.low.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when a swing level is cleared by the required distance."},
+      {"name": "direction", "type": "string", "description": "LONG for a break above swing.high, SHORT for a break below swing.low."},
+      {"name": "level_price", "type": "number", "description": "Price of the swing level that was broken."},
+      {"name": "break_distance_atr", "type": "number", "description": "Distance beyond that level divided by ATR."},
+      {"name": "reason", "type": "string", "description": "Which level was tested, the required distance and the observed distance."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "break_above_swing_high_matches",
+      "description": "Close sits 4.0 above swing.high with an ATR of 8.0, a distance of 0.5 ATR which clears the 0.25 requirement.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2054.0, "candle.high": 2055.0, "candle.low": 2049.0, "atr": 8.0},
+      "given_parameters": {"break_atr_multiple_min": 0.25, "swing_lookback": 20, "atr_period": 14, "require_body_close_beyond": true},
+      "expected_output": {"matched": true, "direction": "LONG", "level_price": 2050.0, "break_distance_atr": 0.5}
+    },
+    {
+      "case_id": "break_below_swing_low_matches",
+      "description": "Close sits 4.0 below swing.low with an ATR of 8.0, a distance of 0.5 ATR.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 1986.0, "candle.high": 1991.0, "candle.low": 1985.0, "atr": 8.0},
+      "given_parameters": {"break_atr_multiple_min": 0.25, "swing_lookback": 20, "atr_period": 14, "require_body_close_beyond": true},
+      "expected_output": {"matched": true, "direction": "SHORT", "level_price": 1990.0, "break_distance_atr": 0.5}
+    },
+    {
+      "case_id": "wick_through_level_without_close_does_not_match",
+      "description": "The bar high pierces swing.high by 3.0 but the close sits below it, and require_body_close_beyond is true.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2048.0, "candle.high": 2053.0, "candle.low": 2046.0, "atr": 8.0},
+      "given_parameters": {"break_atr_multiple_min": 0.25, "swing_lookback": 20, "atr_period": 14, "require_body_close_beyond": true},
+      "expected_output": {"matched": false, "level_price": 2050.0, "break_distance_atr": -0.25}
+    },
+    {
+      "case_id": "break_distance_below_threshold_does_not_match",
+      "description": "Close sits 1.0 above swing.high with an ATR of 8.0, a distance of 0.125 ATR which fails the 0.25 requirement.",
+      "given_hermes_facts": {"swing.high": 2050.0, "swing.low": 1990.0, "candle.close": 2051.0, "candle.high": 2051.5, "candle.low": 2048.0, "atr": 8.0},
+      "given_parameters": {"break_atr_multiple_min": 0.25, "swing_lookback": 20, "atr_period": 14, "require_body_close_beyond": true},
+      "expected_output": {"matched": false, "level_price": 2050.0, "break_distance_atr": 0.125}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — structure break, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. swing_lookback is stated identically to swing_level_proximity so the two entries agree on what a swing point is, without either referencing the other: each declares the definition for itself, as PID line 59 requires."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

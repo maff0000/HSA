@@ -1,0 +1,102 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "range_compression",
+  "strategy_version": "1.0.0",
+  "title": "Range compression",
+  "description": "Short-window average true range divided by long-window average true range is at or below compression_ratio_max, and that condition has held for at least min_bars_compressed consecutive bars.",
+  "thesis": "Contraction of realised range against its own longer-window baseline is the measurable form of balance. It is the inverse condition to volatility expansion and is stated separately so a chain can require one, the other, or their ordered succession.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "atr.short", "purpose": "Average true range over short_atr_period bars.", "timeframe": "15M"},
+    {"field": "atr.long", "purpose": "Average true range over long_atr_period bars, forming the baseline.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "short_atr_period",
+      "description": "Lookback of the short-window average true range, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 10,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    },
+    {
+      "name": "long_atr_period",
+      "description": "Lookback of the baseline average true range, in bars of the evaluated timeframe. Must exceed short_atr_period.",
+      "type": "integer",
+      "default": 50,
+      "units": "bars",
+      "allowed_range": {"minimum": 5, "maximum": 500, "step": 1}
+    },
+    {
+      "name": "compression_ratio_max",
+      "description": "Maximum value of atr.short divided by atr.long for the bar to count as compressed. A value of 1.0 admits any bar at or below its own baseline.",
+      "type": "number",
+      "default": 0.6,
+      "units": "ratio",
+      "allowed_range": {"minimum": 0.05, "maximum": 1.0}
+    },
+    {
+      "name": "min_bars_compressed",
+      "description": "Number of consecutive bars, ending at the evaluated bar, on which the ratio condition must hold.",
+      "type": "integer",
+      "default": 3,
+      "units": "bars",
+      "allowed_range": {"minimum": 1, "maximum": 100, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["NEUTRAL"],
+    "direction_rule": "Compression carries no directional content: it states that the market is moving less per bar, not which way it will resolve. The strategy always emits NEUTRAL.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the ratio condition has held for min_bars_compressed consecutive bars."},
+      {"name": "direction", "type": "string", "description": "Always NEUTRAL."},
+      {"name": "compression_ratio", "type": "number", "description": "atr.short divided by atr.long on the evaluated bar."},
+      {"name": "bars_compressed", "type": "integer", "description": "Consecutive bars ending at the evaluated bar on which the ratio condition held."},
+      {"name": "reason", "type": "string", "description": "The observed ratio, its threshold, the consecutive-bar count and whether each held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "compression_matches",
+      "description": "Ratio of 0.5 holds on three consecutive bars, at or below the 0.6 threshold for the required three bars.",
+      "given_hermes_facts": {"atr.short": [3.0, 3.0, 3.0], "atr.long": [6.0, 6.0, 6.0]},
+      "given_parameters": {"short_atr_period": 10, "long_atr_period": 50, "compression_ratio_max": 0.6, "min_bars_compressed": 3},
+      "expected_output": {"matched": true, "direction": "NEUTRAL", "compression_ratio": 0.5, "bars_compressed": 3}
+    },
+    {
+      "case_id": "ratio_above_threshold_does_not_match",
+      "description": "Ratio of 0.8 on every bar is above the 0.6 threshold, so no bar counts as compressed.",
+      "given_hermes_facts": {"atr.short": [4.8, 4.8, 4.8], "atr.long": [6.0, 6.0, 6.0]},
+      "given_parameters": {"short_atr_period": 10, "long_atr_period": 50, "compression_ratio_max": 0.6, "min_bars_compressed": 3},
+      "expected_output": {"matched": false, "compression_ratio": 0.8, "bars_compressed": 0}
+    },
+    {
+      "case_id": "run_too_short_does_not_match",
+      "description": "The ratio clears the threshold on the final two bars only, one short of the required three.",
+      "given_hermes_facts": {"atr.short": [5.4, 3.0, 3.0], "atr.long": [6.0, 6.0, 6.0]},
+      "given_parameters": {"short_atr_period": 10, "long_atr_period": 50, "compression_ratio_max": 0.6, "min_bars_compressed": 3},
+      "expected_output": {"matched": false, "compression_ratio": 0.5, "bars_compressed": 2}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — compression, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. Deliberately expressed on the same two HERMES facts as volatility_expansion with the comparator reversed, so a SEQUENCE chain can require compression followed by expansion without either strategy knowing the other exists."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}

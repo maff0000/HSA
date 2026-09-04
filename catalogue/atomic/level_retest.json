@@ -1,0 +1,122 @@
+{
+  "$hsa_kind": "atomic_strategy",
+  "$hsa_contract_version": "1.0.0",
+  "strategy_id": "level_retest",
+  "strategy_version": "1.0.0",
+  "title": "Retest of a broken level",
+  "description": "Price returns to within retest_tolerance_atr_multiple of ATR of a level that HERMES reports as recently broken, no more than max_bars_since_break bars after the break, and when require_close_on_break_side is true closes back on the side the break travelled towards. The broken level, its direction and its age are HERMES-supplied market facts, not the output of another HSA strategy.",
+  "thesis": "A level that has been broken and then revisited without being reclaimed has been tested as support or resistance in its new role. The revisit is what converts a break into evidence rather than a single excursion.",
+  "instruments": ["XAUUSD"],
+  "required_hermes_fields": [
+    {"field": "level.recent_break_price", "purpose": "Price of the structural level HERMES most recently reports as broken.", "timeframe": "15M"},
+    {"field": "level.recent_break_direction", "purpose": "Side the break travelled towards, UP or DOWN, as reported by HERMES.", "timeframe": "15M"},
+    {"field": "level.bars_since_recent_break", "purpose": "Bars elapsed since that break, counted on the evaluated timeframe.", "timeframe": "15M"},
+    {"field": "candle.high", "purpose": "High of the evaluated bar, used to measure the revisit after a downward break.", "timeframe": "15M"},
+    {"field": "candle.low", "purpose": "Low of the evaluated bar, used to measure the revisit after an upward break.", "timeframe": "15M"},
+    {"field": "candle.close", "purpose": "Close of the evaluated bar, used by require_close_on_break_side.", "timeframe": "15M"},
+    {"field": "atr", "purpose": "Average true range over atr_period, used to scale the retest tolerance.", "timeframe": "15M"}
+  ],
+  "parameters": [
+    {
+      "name": "retest_tolerance_atr_multiple",
+      "description": "Maximum distance between the revisiting extreme and the broken level, as a multiple of ATR, for the bar to count as a retest.",
+      "type": "number",
+      "default": 0.25,
+      "units": "atr_multiples",
+      "allowed_range": {"minimum": 0.01, "maximum": 3.0}
+    },
+    {
+      "name": "max_bars_since_break",
+      "description": "Maximum number of bars between the break and the retest. Beyond this the revisit is treated as unrelated to the break.",
+      "type": "integer",
+      "default": 24,
+      "units": "bars",
+      "allowed_range": {"minimum": 1, "maximum": 500, "step": 1}
+    },
+    {
+      "name": "require_close_on_break_side",
+      "description": "When true the evaluated bar must close on the side the break travelled towards, so a retest that reclaims the level does not match.",
+      "type": "boolean",
+      "default": true,
+      "units": "none",
+      "allowed_values": [true, false]
+    },
+    {
+      "name": "atr_period",
+      "description": "Lookback of the average true range used to scale the retest tolerance, in bars of the evaluated timeframe.",
+      "type": "integer",
+      "default": 14,
+      "units": "bars",
+      "allowed_range": {"minimum": 2, "maximum": 100, "step": 1}
+    }
+  ],
+  "direction_semantics": {
+    "emits": ["LONG", "SHORT"],
+    "direction_rule": "LONG when level.recent_break_direction is UP and the bar low returns to within tolerance of the level from above; SHORT when it is DOWN and the bar high returns to within tolerance from below.",
+    "inversion_allowed": false
+  },
+  "output_contract": {
+    "signal_type": "BOOLEAN",
+    "fields": [
+      {"name": "matched", "type": "boolean", "description": "True when the revisit, its age and the close-side condition all hold."},
+      {"name": "direction", "type": "string", "description": "LONG after an upward break, SHORT after a downward break."},
+      {"name": "level_price", "type": "number", "description": "Price of the broken level the retest was measured against."},
+      {"name": "retest_distance_atr", "type": "number", "description": "Distance from the revisiting extreme to that level, divided by ATR."},
+      {"name": "bars_since_break", "type": "integer", "description": "Bars elapsed between the break and the evaluated bar."},
+      {"name": "reason", "type": "string", "description": "Each condition, its threshold and whether it held."}
+    ],
+    "reason_field": "reason",
+    "emits_on_insufficient_history": "NULL"
+  },
+  "deterministic_test_cases": [
+    {
+      "case_id": "retest_after_upward_break_matches",
+      "description": "Bar low returns to 1.0 above the level with an ATR of 8.0, a distance of 0.125 ATR, six bars after an upward break, closing above the level.",
+      "given_hermes_facts": {"level.recent_break_price": 2050.0, "level.recent_break_direction": "UP", "level.bars_since_recent_break": 6, "candle.high": 2056.0, "candle.low": 2051.0, "candle.close": 2055.0, "atr": 8.0},
+      "given_parameters": {"retest_tolerance_atr_multiple": 0.25, "max_bars_since_break": 24, "require_close_on_break_side": true, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "LONG", "level_price": 2050.0, "retest_distance_atr": 0.125, "bars_since_break": 6}
+    },
+    {
+      "case_id": "retest_after_downward_break_matches",
+      "description": "Bar high returns to 1.0 below the level with an ATR of 8.0, four bars after a downward break, closing below the level.",
+      "given_hermes_facts": {"level.recent_break_price": 1990.0, "level.recent_break_direction": "DOWN", "level.bars_since_recent_break": 4, "candle.high": 1989.0, "candle.low": 1984.0, "candle.close": 1985.0, "atr": 8.0},
+      "given_parameters": {"retest_tolerance_atr_multiple": 0.25, "max_bars_since_break": 24, "require_close_on_break_side": true, "atr_period": 14},
+      "expected_output": {"matched": true, "direction": "SHORT", "level_price": 1990.0, "retest_distance_atr": 0.125, "bars_since_break": 4}
+    },
+    {
+      "case_id": "revisit_outside_tolerance_does_not_match",
+      "description": "Bar low stops 6.0 above the level with an ATR of 8.0, a distance of 0.75 ATR, outside the 0.25 tolerance.",
+      "given_hermes_facts": {"level.recent_break_price": 2050.0, "level.recent_break_direction": "UP", "level.bars_since_recent_break": 6, "candle.high": 2062.0, "candle.low": 2056.0, "candle.close": 2060.0, "atr": 8.0},
+      "given_parameters": {"retest_tolerance_atr_multiple": 0.25, "max_bars_since_break": 24, "require_close_on_break_side": true, "atr_period": 14},
+      "expected_output": {"matched": false, "retest_distance_atr": 0.75, "bars_since_break": 6}
+    },
+    {
+      "case_id": "revisit_too_late_does_not_match",
+      "description": "The revisit is inside the price tolerance but arrives 40 bars after the break, past the 24-bar bound.",
+      "given_hermes_facts": {"level.recent_break_price": 2050.0, "level.recent_break_direction": "UP", "level.bars_since_recent_break": 40, "candle.high": 2056.0, "candle.low": 2051.0, "candle.close": 2055.0, "atr": 8.0},
+      "given_parameters": {"retest_tolerance_atr_multiple": 0.25, "max_bars_since_break": 24, "require_close_on_break_side": true, "atr_period": 14},
+      "expected_output": {"matched": false, "retest_distance_atr": 0.125, "bars_since_break": 40}
+    },
+    {
+      "case_id": "level_reclaimed_does_not_match",
+      "description": "Price revisits the level inside tolerance but closes back on the opposite side, so require_close_on_break_side rejects it.",
+      "given_hermes_facts": {"level.recent_break_price": 2050.0, "level.recent_break_direction": "UP", "level.bars_since_recent_break": 6, "candle.high": 2052.0, "candle.low": 2044.0, "candle.close": 2046.0, "atr": 8.0},
+      "given_parameters": {"retest_tolerance_atr_multiple": 0.25, "max_bars_since_break": 24, "require_close_on_break_side": true, "atr_period": 14},
+      "expected_output": {"matched": false, "level_price": 2050.0, "bars_since_break": 6}
+    }
+  ],
+  "provenance": {
+    "source_type": "MATT_OBSERVATION",
+    "source_reference": "PID.md line 55 — retest, named as a canonical atomic strategy for HSA v1.",
+    "ingested_at_utc": "2026-09-04T00:00:00Z",
+    "notes": "Architect-set defaults. Boundary call recorded deliberately: the broken level is consumed as a HERMES fact (level.recent_break_price and its companions), not as the output of structure_break. Taking it from another HSA strategy would make this entry aware of a peer and would breach PID line 59; taking it from HERMES keeps it independently testable against fixed facts. A chain that wants the two to agree composes them, it does not wire them together."
+  },
+  "doctrine_assertions": {
+    "self_contained": true,
+    "independently_testable": true,
+    "deterministic": true,
+    "execution_blind": true,
+    "unaware_of_other_strategies": true,
+    "hermes_driven": true
+  }
+}
