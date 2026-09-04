@@ -8,6 +8,15 @@ It is checked on load rather than trusted. A malformed entry raises
 ``LexiconError`` instead of being skipped: an entry that silently failed to
 load would stop its term being recognised, and an unrecognised discretionary
 term is exactly what the fail-closed design exists to prevent.
+
+The same reasoning covers ``realised_by`` and ``hermes_basis_relationship``,
+the declared links from a ruled parameter to the catalogue entry that
+implements it. Their *content* — that the two sides actually agree on
+default, allowed range and measurement basis — is checked by
+``tests/test_lexicon_catalogue_agreement.py``, which is the only place that
+may read the catalogue; intake must not depend on the catalogue at runtime.
+Their *shape* is checked here, so a link that is malformed enough to be
+skipped by that test cannot reach it looking like an absent link.
 """
 
 from __future__ import annotations
@@ -61,6 +70,9 @@ _RESOLUTION_KINDS = (
 _RESPONSIBLE = ("MATT", "SOURCE_AUTHOR", "CER", "HERMES", "NEO")
 
 _TERM_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+_STRATEGY_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
+_PARAMETER_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 @dataclass(frozen=True)
@@ -82,6 +94,12 @@ class Term:
     severity: str | None
     resolution_needed: Mapping[str, Any] | None
     candidate_definitions: tuple[Mapping[str, Any], ...]
+    #: Declared links from this term's parameters to the catalogue parameters
+    #: that realise them. Empty for a REFUSE term, which has no realisation.
+    realised_by: tuple[Mapping[str, Any], ...]
+    #: How the basis fields this term declares are derived from the fields the
+    #: linked catalogue entry actually consumes. ``None`` for a REFUSE term.
+    hermes_basis_relationship: Mapping[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -183,6 +201,107 @@ def _check_hermes_field(field: Any, where: str) -> Mapping[str, Any]:
     return field
 
 
+def _check_realisation(
+    link: Any, where: str, parameter_names: Sequence[str]
+) -> Mapping[str, Any]:
+    """Structural check of one declared lexicon-parameter -> catalogue link."""
+    lexicon_parameter = _require_text(link, "lexicon_parameter", where)
+    if lexicon_parameter not in parameter_names:
+        raise LexiconError(
+            "%s: lexicon_parameter %r is not declared by this term (declared: "
+            "%s). A link to a parameter that does not exist would silently "
+            "leave the real parameter unrealised"
+            % (where, lexicon_parameter, ", ".join(parameter_names) or "none")
+        )
+    strategy_id = _require_text(link, "catalogue_strategy_id", where)
+    if not _STRATEGY_ID.match(strategy_id):
+        raise LexiconError(
+            "%s: catalogue_strategy_id %r does not match the contract identity "
+            "pattern ^[a-z][a-z0-9_]{2,63}$" % (where, strategy_id)
+        )
+    version = _require_text(link, "catalogue_strategy_version", where)
+    if not _SEMVER.match(version):
+        raise LexiconError(
+            "%s: catalogue_strategy_version %r is not strict semver. Identity "
+            "is strategy_id AND strategy_version together (PID line 72), so a "
+            "link that does not pin a version does not pin a realisation"
+            % (where, version)
+        )
+    catalogue_parameter = _require_text(link, "catalogue_parameter", where)
+    if not _PARAMETER_NAME.match(catalogue_parameter):
+        raise LexiconError(
+            "%s: catalogue_parameter %r does not match the contract parameter "
+            "name pattern ^[a-z][a-z0-9_]{0,63}$" % (where, catalogue_parameter)
+        )
+    phrases = _require(link, "basis_phrases", where)
+    if not isinstance(phrases, list) or not phrases:
+        raise LexiconError(
+            "%s: basis_phrases must be a non-empty list. It is what makes "
+            "'same measurement basis' checkable rather than asserted" % where
+        )
+    for i, phrase in enumerate(phrases):
+        if not isinstance(phrase, str) or not phrase.strip():
+            raise LexiconError(
+                "%s: basis_phrases[%d] must be a non-empty string" % (where, i)
+            )
+    _require_text(link, "why_the_names_differ", where)
+    _require_text(link, "range_reconciliation", where)
+    return link
+
+
+def _check_basis_relationship(
+    relationship: Any, where: str, basis_fields: Sequence[str]
+) -> Mapping[str, Any]:
+    """Structural check of the declared basis-versus-derivation relationship.
+
+    Intake declares the quantities the ruling is stated in; the catalogue
+    declares the raw facts they are computed from. The lists differ on
+    purpose. Requiring every declared basis field to carry a derivation is
+    what stops that difference from being an unexplained divergence.
+    """
+    _require_text(relationship, "statement", where)
+    raw = _require(relationship, "derivations", where)
+    if not isinstance(raw, list) or not raw:
+        raise LexiconError("%s: derivations must be a non-empty list" % where)
+    covered: list[str] = []
+    for i, derivation in enumerate(raw):
+        sub = "%s derivations[%d]" % (where, i)
+        basis_field = _require_text(derivation, "basis_field", sub)
+        if basis_field not in basis_fields:
+            raise LexiconError(
+                "%s: basis_field %r is not one of this term's "
+                "required_hermes_fields (%s)"
+                % (sub, basis_field, ", ".join(basis_fields) or "none")
+            )
+        if basis_field in covered:
+            raise LexiconError("%s: basis_field %r derived twice" % (sub, basis_field))
+        covered.append(basis_field)
+        sources = _require(derivation, "derived_from", sub)
+        if not isinstance(sources, list) or not sources:
+            raise LexiconError("%s: derived_from must be a non-empty list" % sub)
+        for j, source in enumerate(sources):
+            if not isinstance(source, str) or not source.strip():
+                raise LexiconError(
+                    "%s: derived_from[%d] must be a non-empty string" % (sub, j)
+                )
+        _require_text(derivation, "expression", sub)
+    missing = [field for field in basis_fields if field not in covered]
+    if missing:
+        raise LexiconError(
+            "%s: no derivation declared for required_hermes_fields %s. An "
+            "undeclared basis field is exactly the divergence this exists to "
+            "prevent" % (where, ", ".join(missing))
+        )
+    catalogue_only = relationship.get("catalogue_only_fields", [])
+    if not isinstance(catalogue_only, list):
+        raise LexiconError("%s: catalogue_only_fields must be a list" % where)
+    for i, field in enumerate(catalogue_only):
+        sub = "%s catalogue_only_fields[%d]" % (where, i)
+        _require_text(field, "field", sub)
+        _require_text(field, "why", sub)
+    return relationship
+
+
 def _check_resolution(resolution: Any, where: str) -> Mapping[str, Any]:
     _check_enum(_require(resolution, "kind", where), _RESOLUTION_KINDS, where, "kind")
     _check_enum(
@@ -215,6 +334,8 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
     severity: str | None = None
     resolution: Mapping[str, Any] | None = None
     candidates: tuple[Mapping[str, Any], ...] = ()
+    realised_by: tuple[Mapping[str, Any], ...] = ()
+    basis_relationship: Mapping[str, Any] | None = None
 
     if disposition == PARAMETERISE:
         measurement_basis = _require_text(raw, "measurement_basis", where)
@@ -236,6 +357,31 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
             _check_hermes_field(field, "%s required_hermes_fields[%d]" % (where, i))
             for i, field in enumerate(raw_fields)
         )
+        parameter_names = [str(param["name"]) for param in parameters]
+        raw_links = raw.get("realised_by", [])
+        if not isinstance(raw_links, list):
+            raise LexiconError("%s: realised_by must be a list" % where)
+        linked: list[str] = []
+        for i, link in enumerate(raw_links):
+            checked = _check_realisation(
+                link, "%s realised_by[%d]" % (where, i), parameter_names
+            )
+            name = str(checked["lexicon_parameter"])
+            if name in linked:
+                raise LexiconError(
+                    "%s realised_by[%d]: lexicon_parameter %r is linked more "
+                    "than once; one parameter has one realisation"
+                    % (where, i, name)
+                )
+            linked.append(name)
+        realised_by = tuple(raw_links)
+        raw_relationship = raw.get("hermes_basis_relationship")
+        if raw_relationship is not None:
+            basis_relationship = _check_basis_relationship(
+                raw_relationship,
+                "%s hermes_basis_relationship" % where,
+                [str(field["field"]) for field in hermes],
+            )
     else:
         if raw.get("measurement_basis") is not None:
             raise LexiconError(
@@ -243,6 +389,14 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
                 "known basis is precisely what would make it parameterisable "
                 "(docs/AMBIGUITY-POLICY.md)" % where
             )
+        for key in ("realised_by", "hermes_basis_relationship"):
+            if key in raw:
+                raise LexiconError(
+                    "%s: a REFUSE term must not declare %r. There is no "
+                    "measurement basis to realise, so a link to a catalogue "
+                    "parameter would assert a resolution that was refused "
+                    "(docs/AMBIGUITY-POLICY.md)" % (where, key)
+                )
         why_unresolved = _require_text(raw, "why_unresolved", where)
         raw_blocks = _require(raw, "blocks", where)
         if not isinstance(raw_blocks, list) or not raw_blocks:
@@ -290,6 +444,8 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
         severity=severity,
         resolution_needed=resolution,
         candidate_definitions=candidates,
+        realised_by=realised_by,
+        hermes_basis_relationship=basis_relationship,
     )
 
 

@@ -134,6 +134,118 @@ bounding its range and requiring evidence is what stops that.
 Downstream consumers can therefore always answer "who decided this, and is
 it settled?" from the document alone.
 
+## From ruling to realisation
+
+A ruling that nothing implements is paperwork. This section states how a
+parameterised term reaches the atomic strategy that runs it, and what must
+stay true between them.
+
+Intake and the catalogue are two halves of one ruling, written in two files:
+
+- `hsa/intake/lexicon.json` declares the ruled term, its measurement basis
+  and its bounded parameters. It is what a raw source is scanned against.
+- `catalogue/atomic/<strategy_id>.json` declares the atomic strategy that
+  computes the basis and applies the threshold. It is what FORGE implements.
+
+They do not share a naming convention and are not meant to. Intake names a
+parameter after the phrase it resolves — `min_wick_to_range_ratio`. The
+catalogue names it after the quantity and the comparator —
+`wick_to_range_ratio_min`. Both conventions are internally consistent, and
+renaming either side would change a promoted catalogue identity, which
+`docs/VERSIONING.md` forbids in place.
+
+So the correspondence is **declared, not inferred**. Every parameterised
+lexicon term carries a `realised_by` entry naming the catalogue
+`strategy_id`, `strategy_version` and parameter that implements it.
+`tests/test_lexicon_catalogue_agreement.py` fails if that link points at
+something that does not exist, or if the two sides disagree on **type,
+units, default or allowed range**.
+
+The allowed range matters as much as the default, and it is the half that
+had silently diverged. Intake declared `min_wick_to_range_ratio` as 0.3-0.9
+on a 0.05 grid while the realisation accepted 0.3-0.95 with no grid, and
+declared `max_wick_to_range_ratio` as 0.0-0.25 while the realisation
+accepted 0.0-0.3. Neither side's bound carries evidence — what this document
+ratifies is the basis, never the value — so the narrower bound was not a
+safeguard, it was an unratified extra restriction on a ratified basis, and
+the grid was a claim about permitted values that the thing actually running
+did not enforce. A CER sweep of the realisation could therefore have
+produced evidence for a value intake called impermissible. **The realisation
+is the reconciled side**: its bounds are the ones reasoned about alongside
+the other parameters of the same bar, and they are now declared identically
+in both files.
+
+### The lexicon is versioned, and citations are pinned to a version
+
+Reconciling those bounds changed a declared ruling, so
+`hsa/intake/lexicon.json` moved from `lexicon_version` **1.0.0** to
+**1.1.0**. That is not bookkeeping. An intake draft records the
+`lexicon_version` that produced it, and a governed package records the draft
+it came from, so a citation of a lexicon version is a claim about what the
+ruling said *at that time*.
+
+`strategies/wick_rejection_sequence/0.1.0` was ingested under lexicon 1.0.0
+and its provenance records the bounds that version declared — 0.3 to 0.9 and
+0.0 to 0.25. **That record is history and stays correct as written**: it says
+what the intake draft declared, under a named lexicon version, on a named
+date. It is not a statement about the current ruling, and it must not be
+edited to look like one — the package is a promoted-candidate artefact under
+`docs/VERSIONING.md` and rewriting its provenance would destroy the audit
+trail this whole document exists to protect. A reader reconciling that
+package against today's lexicon should read the version numbers, not assume
+they match.
+
+What is *not* history, and is enforced now, is that the package's embedded
+`rejection_wick 1.0.0` and `no_wick_candle 1.0.0` carry the same defaults and
+the same bounds as the catalogue entries of those identities, and that those
+entries agree with the lexicon. Those two chains of equality are what make
+the package's claim to a ratified basis checkable.
+
+### Basis fields and derivation fields
+
+The two files also declare different HERMES facts, and this too is
+deliberate rather than a defect.
+
+- Intake declares the **basis fields** — the quantities the ruling is
+  *stated in*: `candle.wick_upper`, `candle.wick_lower`, `candle.range`.
+  Reading the ruling should not require reconstructing a wick from four
+  numbers.
+- The catalogue declares the **derivation fields** — the raw facts the
+  realisation *computes from*: `candle.open`, `candle.high`, `candle.low`,
+  `candle.close`, plus `atr`.
+
+The relationship between them is declared in the lexicon as
+`hermes_basis_relationship` and is exactly this:
+
+| Basis field (intake) | Derived from (catalogue) |
+| --- | --- |
+| `candle.wick_upper` | `candle.high - max(candle.open, candle.close)` |
+| `candle.wick_lower` | `min(candle.open, candle.close) - candle.low` |
+| `candle.range` | `candle.high - candle.low` |
+
+`atr` appears only on the catalogue side. It is not part of the basis: the
+atomic entries add a minimum bar range as an ATR multiple so the ratio is
+not read off a bar too compressed to carry it. **A realisation may add
+guards on top of the ruled basis; it may not change the basis.** The lexicon
+declares `atr` as a catalogue-only field with that reason, so the addition
+is visible rather than assumed.
+
+`tests/test_lexicon_catalogue_agreement.py` enforces the table above in both
+directions: every basis field must be derivable from facts the linked
+catalogue entry actually consumes, and every fact that entry consumes must be
+either used by a derivation or declared catalogue-only. A field appearing or
+disappearing on either side fails the test, so this section cannot quietly
+stop being true.
+
+One limit, stated rather than glossed. Whether two prose descriptions name
+the *same* measurement cannot be compared mechanically. Each link declares
+`basis_phrases` — the words that must survive in both the lexicon's own
+statement of the basis and the catalogue's description of the parameter
+("wick", "total bar range", and the comparator). That is a canary on the
+quantity, the denominator and the direction, not a proof of semantic
+identity. It fires on the drift that matters — a re-based ratio, a flipped
+comparator — and it does not pretend to more.
+
 ## Unknown terms fail closed
 
 The lexicon is finite. Traders are not. So the single most important

@@ -117,6 +117,46 @@ Two limits of the mechanical scan, stated so nobody over-trusts it:
 
 ---
 
+### The link back to intake
+
+A catalogue entry is not only a building block; for the two terms the
+ambiguity policy parameterises, it is the **realisation** of a ruling made at
+intake. `hsa/intake/lexicon.json` resolves *large wick* onto
+`min_wick_to_range_ratio` and *no wick* onto `max_wick_to_range_ratio`;
+`rejection_wick` and `no_wick_candle` implement those as
+`wick_to_range_ratio_min` and `wick_to_range_ratio_max`.
+
+The names differ on purpose — intake names the phrase it resolved, the
+catalogue names the quantity and the comparator — so the correspondence is
+**declared** rather than inferred from matching names. It is declared in the
+lexicon, as `realised_by`, naming this directory's `strategy_id`,
+`strategy_version` and parameter. The link points one way only: a lexicon
+entry may be revised, but a promoted catalogue entry may not be edited in
+place, so the mutable side is the side that carries the pointer.
+
+`tests/test_lexicon_catalogue_agreement.py` fails if a link names an entry,
+version or parameter this directory does not hold, or if the two sides
+disagree on type, units, default or allowed range. That test is the only
+thing that reads both files; nothing at runtime does. **Consequences for
+anyone editing an entry here:**
+
+- Changing a linked parameter's default, units, type or `allowed_range`
+  breaks the agreement test until the lexicon is changed to match. That is
+  the intended friction — the number intake hands over must be the number
+  this directory implements.
+- Renaming a linked parameter breaks the link outright. Under the
+  immutability rule below it is a new version anyway, and the lexicon link
+  must then be repointed at that version.
+- Adding or removing a `required_hermes_fields` entry on a linked strategy
+  breaks the declared basis/derivation relationship until the lexicon
+  accounts for the change. See `docs/AMBIGUITY-POLICY.md`, "Basis fields and
+  derivation fields": intake declares the quantities the ruling is stated
+  in, this directory declares the raw facts they are computed from, and
+  every fact consumed here is either used by a derivation or declared
+  catalogue-only with a reason.
+
+---
+
 ## Versioning
 
 Identity is `strategy_id` plus `strategy_version` together, everywhere

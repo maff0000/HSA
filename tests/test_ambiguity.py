@@ -356,6 +356,36 @@ def test_advisory_items_do_not_block_but_are_carried():
     assert advisory[0]["severity"] == "ADVISORY"
 
 
+# --- the fixture inventory stays documented ----------------------------------
+
+
+def test_the_fixture_readme_lists_every_fixture():
+    """``tests/fixtures/intake/README.md`` is the only index of these inputs.
+
+    It went stale once already: two acceptance work items added three
+    fixtures and the table was not updated, so a reader could not tell
+    ``example_b_rejection_wick_sequence.txt`` (a unit fixture) from
+    ``example_b_wick_rejection_sequence.txt`` (a governed package's source,
+    asserted byte for byte) without opening both. Documentation nobody checks
+    drifts, so this checks it, in both directions.
+    """
+    readme = FIXTURES / "README.md"
+    listed = set()
+    for line in readme.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("| `"):
+            continue
+        listed.add(line.split("`")[1])
+
+    present = {path.name for path in FIXTURES.iterdir() if path.name != "README.md"}
+
+    assert not present - listed, "fixtures with no row in README.md: %s" % ", ".join(
+        sorted(present - listed)
+    )
+    assert not listed - present, "README.md rows with no such fixture: %s" % ", ".join(
+        sorted(listed - present)
+    )
+
+
 # --- honesty about the mechanism ---------------------------------------------
 
 

@@ -1,8 +1,8 @@
 {
-  "lexicon_version": "1.0.0",
+  "lexicon_version": "1.1.0",
   "ruling_document": "docs/AMBIGUITY-POLICY.md",
   "ratified_by": "HSA_ARCHITECT_RULING",
-  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.",
+  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.\n\nEvery PARAMETERISE term declares realised_by: the catalogue entry and parameter that its declared parameter is actually implemented as. Intake and the catalogue are two halves of one ruling, and the link between them is DECLARED here rather than left to matching names — the names deliberately do not match. tests/test_lexicon_catalogue_agreement.py fails if a link points at a catalogue entry or parameter that does not exist, or if the two sides disagree on type, units, default or allowed_range. A PARAMETERISE term also declares hermes_basis_relationship, which states how the basis fields intake declares are derived from the fields the catalogue entry actually consumes.",
 
   "unknown_term_policy": {
     "disposition": "REFUSE",
@@ -42,18 +42,40 @@
       "disposition": "PARAMETERISE",
       "pid_reference": "PID line 114; required by acceptance Example B, PID line 242",
       "pattern": "\\b(?:large|larger|big|bigger|huge|long|sizeable|sizable|significant|substantial)(?:[ -][a-z0-9.%]+){0,3}[ -]wicks?\\b",
-      "measurement_basis": "Wick length as a fraction of the evaluated candle's total range (high minus low), measured on that one bar.",
+      "measurement_basis": "Wick length as a fraction of the total bar range (candle.high minus candle.low) of the evaluated bar, measured on that one bar.",
       "basis_rationale": "Both quantities are unambiguous single-bar HERMES facts. No level must be constructed, no lookback chosen, and no competing construction of 'wick' exists that would rank real bars differently. Only the cut-off is missing, and a cut-off is a bounded parameter (PID line 140), not a trading decision.",
       "parameters": [
         {
           "name": "min_wick_to_range_ratio",
-          "description": "Minimum ratio of wick length to total candle range for the wick to count as large. Resolves the discretionary phrase 'large wick' onto its ratified measurement basis; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
+          "description": "Minimum ratio of wick length to the total bar range for the wick to count as large. Resolves the discretionary phrase 'large wick' onto its ratified measurement basis; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
           "type": "number",
           "default": 0.6,
           "units": "ratio",
-          "allowed_range": {"minimum": 0.3, "maximum": 0.9, "step": 0.05}
+          "allowed_range": {"minimum": 0.3, "maximum": 0.95}
         }
       ],
+      "realised_by": [
+        {
+          "lexicon_parameter": "min_wick_to_range_ratio",
+          "catalogue_strategy_id": "rejection_wick",
+          "catalogue_strategy_version": "1.0.0",
+          "catalogue_parameter": "wick_to_range_ratio_min",
+          "basis_phrases": ["wick", "total bar range", "minimum"],
+          "why_the_names_differ": "Intake names a parameter after the phrase it resolves; the catalogue names it after the quantity and the comparator. Both conventions are already in force across their own files, so this link records the correspondence instead of renaming either side — a rename would change a promoted catalogue identity, which docs/VERSIONING.md forbids in place.",
+          "range_reconciliation": "Intake previously declared 0.3-0.9 with a 0.05 step while the realisation accepted 0.3-0.95 with no step. The catalogue bound is now declared on both sides. The catalogue is the side that actually runs and the side whose bound is reasoned about alongside body_to_range_ratio_max and opposing_wick_to_range_ratio_max, which is what makes a 0.95 ceiling coherent rather than degenerate; neither bound carries evidence, so the narrower one was an unratified extra restriction on the ruled basis rather than a safeguard. The step was dropped for the same reason: the realisation enforces no grid, so intake must not claim one."
+        }
+      ],
+      "hermes_basis_relationship": {
+        "statement": "Intake declares the BASIS fields — the quantities the ruling is stated in. The catalogue entry declares the DERIVATION fields — the raw HERMES facts those quantities are computed from. The two lists are deliberately different and must stay reconcilable: every basis field below is derived from fields the linked catalogue entry consumes, and every field the catalogue entry consumes is either used by a derivation or declared as catalogue-only with a reason.",
+        "derivations": [
+          {"basis_field": "candle.wick_upper", "derived_from": ["candle.high", "candle.open", "candle.close"], "expression": "candle.high - max(candle.open, candle.close)"},
+          {"basis_field": "candle.wick_lower", "derived_from": ["candle.open", "candle.close", "candle.low"], "expression": "min(candle.open, candle.close) - candle.low"},
+          {"basis_field": "candle.range", "derived_from": ["candle.high", "candle.low"], "expression": "candle.high - candle.low"}
+        ],
+        "catalogue_only_fields": [
+          {"field": "atr", "why": "The catalogue entry adds a minimum bar range as an ATR multiple (min_range_atr_multiple) so the ratio is not read off a bar too compressed to carry it. That guard is the realisation's, not the ruling's: docs/AMBIGUITY-POLICY.md ratifies the wick-over-range basis only. A realisation may add a guard on top of the basis; it may not change the basis."}
+        ]
+      },
       "required_hermes_fields": [
         {"field": "candle.wick_upper", "purpose": "Upper wick length of the evaluated bar: high minus the greater of open and close."},
         {"field": "candle.wick_lower", "purpose": "Lower wick length of the evaluated bar: the lesser of open and close, minus low."},
@@ -66,18 +88,40 @@
       "disposition": "PARAMETERISE",
       "pid_reference": "PID line 55 names no-wick candle as an atomic example; required by acceptance Example B, PID line 242",
       "pattern": "\\bno[ -]wicks?(?:[ -][a-z0-9.%]+){0,3}[ -](?:candles?|bars?|confirmations?|closes?|bodies|body)\\b|\\bno[ -]wicks?\\b",
-      "measurement_basis": "The larger of the two wicks as a fraction of the evaluated candle's total range, required to be at or below a small cap, measured on that one bar.",
+      "measurement_basis": "The larger of the two wicks as a fraction of the total bar range (candle.high minus candle.low) of the evaluated bar, required to be at or below a declared cap, measured on that one bar.",
       "basis_rationale": "The same single-bar basis as large_wick, read in the opposite direction. 'No wick' cannot mean exactly zero on real data, so a tolerance is unavoidable; that tolerance is a bounded parameter rather than a choice between constructions.",
       "parameters": [
         {
           "name": "max_wick_to_range_ratio",
-          "description": "Maximum ratio of the larger wick to total candle range for the candle to count as no-wick. Resolves the discretionary tolerance in 'no-wick'; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
+          "description": "Maximum ratio of the larger wick to the total bar range for the candle to count as no-wick. Resolves the discretionary tolerance in 'no-wick'; the DEFAULT is provisional and must be settled by CER evidence before promotion (docs/AMBIGUITY-POLICY.md, 'Attribution').",
           "type": "number",
           "default": 0.1,
           "units": "ratio",
-          "allowed_range": {"minimum": 0.0, "maximum": 0.25, "step": 0.01}
+          "allowed_range": {"minimum": 0.0, "maximum": 0.3}
         }
       ],
+      "realised_by": [
+        {
+          "lexicon_parameter": "max_wick_to_range_ratio",
+          "catalogue_strategy_id": "no_wick_candle",
+          "catalogue_strategy_version": "1.0.0",
+          "catalogue_parameter": "wick_to_range_ratio_max",
+          "basis_phrases": ["wick", "total bar range", "maximum"],
+          "why_the_names_differ": "The same naming conventions as large_wick: intake names the phrase it resolves, the catalogue names the quantity and the comparator.",
+          "range_reconciliation": "Intake previously declared 0.0-0.25 with a 0.01 step while the realisation accepted 0.0-0.3 with no step. The catalogue bound is now declared on both sides. A 0.3 cap on either wick is only loose in isolation: the realisation bounds the same bar with body_to_range_ratio_min, whose own floor is 0.5, so the wider wick cap cannot on its own admit a bar with no body. Intake declares no body parameter, so its tighter cap was standing in for a constraint the realisation already carries elsewhere, and duplicating that constraint in a narrower bound made the two files disagree without making the strategy stricter. The step was dropped because the realisation enforces no grid."
+        }
+      ],
+      "hermes_basis_relationship": {
+        "statement": "Intake declares the BASIS fields — the quantities the ruling is stated in. The catalogue entry declares the DERIVATION fields — the raw HERMES facts those quantities are computed from. The two lists are deliberately different and must stay reconcilable: every basis field below is derived from fields the linked catalogue entry consumes, and every field the catalogue entry consumes is either used by a derivation or declared as catalogue-only with a reason.",
+        "derivations": [
+          {"basis_field": "candle.wick_upper", "derived_from": ["candle.high", "candle.open", "candle.close"], "expression": "candle.high - max(candle.open, candle.close)"},
+          {"basis_field": "candle.wick_lower", "derived_from": ["candle.open", "candle.close", "candle.low"], "expression": "min(candle.open, candle.close) - candle.low"},
+          {"basis_field": "candle.range", "derived_from": ["candle.high", "candle.low"], "expression": "candle.high - candle.low"}
+        ],
+        "catalogue_only_fields": [
+          {"field": "atr", "why": "The catalogue entry adds a minimum bar range as an ATR multiple (min_range_atr_multiple), and bounds the body with body_to_range_ratio_min. Both are the realisation's guards on top of the ruled wick-over-range basis, not part of the basis itself."}
+        ]
+      },
       "required_hermes_fields": [
         {"field": "candle.wick_upper", "purpose": "Upper wick length of the evaluated bar: high minus the greater of open and close."},
         {"field": "candle.wick_lower", "purpose": "Lower wick length of the evaluated bar: the lesser of open and close, minus low."},
