@@ -78,10 +78,15 @@ def test_intake_satisfies_the_command_module_contract():
 
 
 def test_intake_does_not_edit_the_shared_registry():
-    """This work item adds a module; the PL adds the registry line."""
+    """This work item added a module; the PL added the registry line.
+
+    Asserted the line was still commented while W2C was outstanding; now
+    asserts the PL wired it, which is the same contract on the far side of
+    integration.
+    """
     registry = Path(intake_command.__file__).parent / "__init__.py"
     text = registry.read_text(encoding="utf-8")
-    assert '# "intake": _intake,' in text
+    assert '"intake": _intake,' in text
 
 
 # --- reading a raw strategy description --------------------------------------

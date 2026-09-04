@@ -11,6 +11,12 @@ the same way:
     1  the document was read but failed contract validation
     2  usage error (argparse)
     3  any other deliberate HSA error, e.g. unreadable file, unknown kind
+    4  STRATEGY_NOT_SUFFICIENTLY_DEFINED (hsa intake)
+
+Code 4 is not a failure. It is HSA correctly refusing to guess an
+ambiguous trading rule (PID lines 39, 120), and a caller must be able to
+tell that refusal apart from an error. Commands return it directly from
+``run``; ``main`` passes an int through unchanged.
 """
 
 from __future__ import annotations

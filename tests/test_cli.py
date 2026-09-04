@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -10,7 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from hsa.cli import EXIT_ERROR, EXIT_INVALID, EXIT_OK, EXIT_USAGE, main
+from hsa.cli import (
+    EXIT_ERROR,
+    EXIT_INVALID,
+    EXIT_OK,
+    EXIT_USAGE,
+    build_parser,
+    main,
+)
 from hsa.commands import COMMANDS
 from hsa.contracts import KINDS
 
@@ -41,13 +49,30 @@ def test_validate_is_registered():
     assert "validate" in COMMANDS
 
 
-def test_registry_placeholders_name_the_expected_commands():
-    """The commented placeholder lines are the contract with later work items."""
-    source = Path(COMMANDS["validate"].__file__).parent / "__init__.py"
-    text = source.read_text(encoding="utf-8")
-    for name in ("boot", "intake", "chain", "cer"):
-        assert '# "%s": _%s,' % (name, name) in text
-        assert "# from hsa.commands import %s as _%s" % (name, name) in text
+def test_all_five_hsa_v1_commands_are_registered():
+    """The placeholder contract is fulfilled: every v1 command is wired.
+
+    This replaced an earlier test asserting the placeholder lines were still
+    commented out. That assertion was correct only while the work items were
+    outstanding; once the PL wired the registry, testing for the absence
+    marker would have been testing that the work had NOT been done.
+    """
+    assert set(COMMANDS) == {"validate", "boot", "intake", "chain", "cer"}
+
+
+def test_every_registered_command_is_reachable_from_the_cli():
+    """A registered module is not enough — argparse must expose it."""
+    parser = build_parser()
+    subparsers = [
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    ]
+    assert len(subparsers) == 1
+    choices = subparsers[0].choices
+    assert set(choices) == set(COMMANDS)
+    for name, subparser in choices.items():
+        assert subparser.get_default("_run") is COMMANDS[name].run
 
 
 def test_cli_picks_up_any_module_satisfying_the_registry_contract(

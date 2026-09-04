@@ -17,7 +17,11 @@ dev = ["pytest>=7"]
 hsa = "hsa.cli:main"
 
 [tool.setuptools]
-packages = ["hsa", "hsa.commands"]
+packages = ["hsa", "hsa.commands", "hsa.intake"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"hsa.intake" = ["lexicon.json"]
 
 [tool.setuptools.dynamic]
 version = {attr = "hsa.__version__"}

@@ -33,20 +33,21 @@ from types import ModuleType
 
 from hsa.commands import validate as _validate
 
-# Placeholder registry lines for the commands other work items add. Each
-# owner adds their module file and uncomments exactly one line here.
-# from hsa.commands import boot as _boot
-# from hsa.commands import intake as _intake
-# from hsa.commands import chain as _chain
-# from hsa.commands import cer as _cer
+# All five HSA v1 commands. Each work item contributed exactly one module
+# file; the PL wired the registry centrally so parallel Engineers never
+# shared this file.
+from hsa.commands import boot as _boot
+from hsa.commands import intake as _intake
+from hsa.commands import chain as _chain
+from hsa.commands import cer as _cer
 
 #: Subcommand name -> command module. Order is the order shown in --help.
 COMMANDS: dict[str, ModuleType] = {
     "validate": _validate,
-    # "boot": _boot,
-    # "intake": _intake,
-    # "chain": _chain,
-    # "cer": _cer,
+    "boot": _boot,
+    "intake": _intake,
+    "chain": _chain,
+    "cer": _cer,
 }
 
 __all__ = ["COMMANDS"]
