@@ -25,6 +25,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -34,9 +35,13 @@ __all__ = [
     "LEXICON_PATH_ENV",
     "PARAMETERISE",
     "REFUSE",
+    "BASIS_SLOT_GROUP",
+    "ANCHOR_PLACEHOLDER",
     "Term",
     "Marker",
     "BasisQualifier",
+    "GlossConstruction",
+    "Attachment",
     "Lexicon",
     "default_lexicon_path",
     "load_lexicon",
@@ -84,6 +89,24 @@ _QUALIFIER_CATEGORIES = (
 #: enum so a lexicon asking for a window nobody implements fails at load
 #: rather than silently inspecting the wrong span of text.
 _WINDOW_UNITS = ("SENTENCE",)
+
+#: The attachment forms the guard implements. Declared here as an enum the
+#: lexicon must cover exactly, so a form added to the data without an
+#: implementation — or dropped from the data while the code still relies on
+#: it — fails the load instead of silently changing what the guard catches.
+_ATTACHMENT_FORMS = ("SLOT", "COMPLEMENT", "GLOSS")
+
+#: The named group every PARAMETERISE pattern must declare: the run of words
+#: its pattern tolerates between the ruled adjective and the ruled head noun.
+#: That slot is a wildcard, and a re-basing lands IN it ("a large ATR wick"),
+#: so the guard has to know where it is. Requiring the group by name is why a
+#: term cannot be added whose slot the guard would silently fail to inspect.
+BASIS_SLOT_GROUP = "basis_slot"
+
+#: Placeholder in a declared gloss pattern, replaced per match by the words
+#: the ruled term actually consumed. Substituted with str.replace, never
+#: str.format: the patterns carry regex quantifiers such as ``{0,24}``.
+ANCHOR_PLACEHOLDER = "{anchor}"
 
 _TERM_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 _STRATEGY_ID = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
@@ -150,6 +173,59 @@ class BasisQualifier:
 
 
 @dataclass(frozen=True)
+class GlossConstruction:
+    """A declared construction in which the source defines its own term.
+
+    "a large wick, and by large I mean twice the 14-period ATR" re-bases the
+    ruled term, but nothing about the words "twice the ATR" is attached to
+    "wick" by position — what attaches them is that the gloss NAMES the ruled
+    word. So the pattern carries an ``{anchor}`` placeholder, replaced per
+    match by the words that match actually consumed, and a gloss that names no
+    ruled word does not fire.
+    """
+
+    gloss_id: str
+    reason: str
+    raw_pattern: str
+
+    def compile_for(self, anchors: Sequence[str]) -> "re.Pattern[str]":
+        """This construction, bound to one term match's own words."""
+        return _compile_gloss(self.raw_pattern, tuple(anchors))
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """The declared ruling on WHEN a qualifier re-bases a ruled term.
+
+    The window says where a qualifier may be looked for. This says when one
+    that was found actually counts, and it is the difference between a guard
+    that refuses ordinary trading prose and one that does not. See
+    ``basis_qualifier_policy.attachment`` in the lexicon for the ruling
+    itself, and ``docs/AMBIGUITY-POLICY.md`` for the reasoning.
+    """
+
+    rule: str
+    forms: tuple[Mapping[str, Any], ...]
+    complement_categories: tuple[str, ...]
+    complement_filler: "re.Pattern[str]"
+    complement_filler_pattern: str
+    gloss_constructions: tuple[GlossConstruction, ...]
+    not_attached: str
+
+    def form(self, name: str) -> Mapping[str, Any]:
+        for entry in self.forms:
+            if entry["form"] == name:
+                return entry
+        raise LexiconError("no attachment form %r declared" % name)
+
+
+@lru_cache(maxsize=512)
+def _compile_gloss(raw_pattern: str, anchors: tuple[str, ...]) -> "re.Pattern[str]":
+    alternation = "(?:%s)" % "|".join(re.escape(anchor) for anchor in anchors)
+    return re.compile(raw_pattern.replace(ANCHOR_PLACEHOLDER, alternation))
+
+
+@dataclass(frozen=True)
 class Lexicon:
     version: str
     ruling_document: str
@@ -160,6 +236,7 @@ class Lexicon:
     basis_qualifiers: tuple[BasisQualifier, ...]
     unknown_term_policy: Mapping[str, Any]
     basis_qualifier_policy: Mapping[str, Any]
+    attachment: Attachment
 
     def term(self, term_id: str) -> Term:
         for candidate in self.terms:
@@ -377,6 +454,18 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
     basis_relationship: Mapping[str, Any] | None = None
 
     if disposition == PARAMETERISE:
+        if BASIS_SLOT_GROUP not in _compile(pattern_text, where).groupindex:
+            raise LexiconError(
+                "%s: a PARAMETERISE pattern must declare the named group "
+                "(?P<%s>...) around the words it tolerates between its ruled "
+                "adjective and its ruled head noun. That slot is a wildcard, "
+                "and a re-basing lands inside it (\"a large ATR wick\"); "
+                "without the group the guard cannot tell the term's own ruled "
+                "words from a yardstick smuggled between them, and would "
+                "resolve the re-basing silently "
+                "(docs/AMBIGUITY-POLICY.md, 'What attaches a qualifier to a "
+                "ruled term')." % (where, BASIS_SLOT_GROUP)
+            )
         measurement_basis = _require_text(raw, "measurement_basis", where)
         basis_rationale = _require_text(raw, "basis_rationale", where)
         raw_params = _require(raw, "parameters", where)
@@ -573,6 +662,106 @@ def _load_basis_qualifier_policy(raw: Any, path: Path) -> Mapping[str, Any]:
     return raw
 
 
+def _load_attachment(raw_policy: Any, path: Path) -> Attachment:
+    """Check the ruling that decides WHEN a found qualifier counts.
+
+    This is the reviewable half of the precision fix, so it lives in data and
+    is checked here rather than assumed. Every declared form must be one the
+    code implements and every implemented form must be declared: a form that
+    appeared in the data without an implementation would read as a guarantee
+    nothing enforces, which is the exact defect this ruling was rewritten to
+    remove.
+    """
+    where = "%s: basis_qualifier_policy attachment" % path
+    raw = _require(raw_policy, "attachment", "%s: basis_qualifier_policy" % path)
+    _require_text(raw, "rule", where)
+    _require_text(raw, "not_attached", where)
+
+    raw_forms = _require(raw, "forms", where)
+    if not isinstance(raw_forms, list) or not raw_forms:
+        raise LexiconError("%s: forms must be a non-empty list" % where)
+    forms: list[Mapping[str, Any]] = []
+    declared: list[str] = []
+    for i, entry in enumerate(raw_forms):
+        sub = "%s forms[%d]" % (where, i)
+        name = _check_enum(_require(entry, "form", sub), _ATTACHMENT_FORMS, sub, "form")
+        _require_text(entry, "description", sub)
+        _require(entry, "categories", sub)
+        declared.append(name)
+        forms.append(entry)
+    if sorted(declared) != sorted(_ATTACHMENT_FORMS):
+        raise LexiconError(
+            "%s: forms must declare exactly the attachment forms the guard "
+            "implements (%s); it declares %s. A form the code implements but "
+            "the data omits is an unreviewed refusal, and a form the data "
+            "declares but the code does not implement is a promise nothing "
+            "keeps"
+            % (where, ", ".join(_ATTACHMENT_FORMS), ", ".join(declared) or "none")
+        )
+
+    complement = next(e for e in forms if e["form"] == "COMPLEMENT")
+    categories = complement["categories"]
+    if not isinstance(categories, list) or not categories:
+        raise LexiconError(
+            "%s: the COMPLEMENT form must declare a non-empty categories "
+            "list. With none, no comparative could ever attach and the "
+            "policy document's own worked example would resolve" % where
+        )
+    for category in categories:
+        _check_enum(category, _QUALIFIER_CATEGORIES, where, "COMPLEMENT category")
+
+    filler_text = _require_text(raw, "complement_filler_pattern", where)
+
+    raw_glosses = _require(raw, "gloss_constructions", where)
+    if not isinstance(raw_glosses, list) or not raw_glosses:
+        raise LexiconError(
+            "%s: gloss_constructions must be a non-empty list. With none, a "
+            "source that defines its own ruled term (\"by large I mean twice "
+            "the ATR\") would resolve onto the ruled basis it just displaced"
+            % where
+        )
+    glosses: list[GlossConstruction] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(raw_glosses):
+        sub = "%s gloss_constructions[%d]" % (where, i)
+        gloss_id = _require_text(entry, "gloss_id", sub)
+        if gloss_id in seen:
+            raise LexiconError("%s declares gloss_id %r more than once" % (where, gloss_id))
+        seen.add(gloss_id)
+        pattern_text = _require_text(entry, "pattern", sub)
+        if ANCHOR_PLACEHOLDER not in pattern_text:
+            raise LexiconError(
+                "%s: pattern must contain the %s placeholder. A gloss is "
+                "attached to a ruled term only because it names that term's "
+                "own word; a gloss pattern that names nothing would fire on "
+                "any definition anywhere in the window"
+                % (sub, ANCHOR_PLACEHOLDER)
+            )
+        gloss = GlossConstruction(
+            gloss_id=gloss_id,
+            reason=_require_text(entry, "reason", sub),
+            raw_pattern=pattern_text,
+        )
+        try:
+            gloss.compile_for(("probe",))
+        except re.error as exc:
+            raise LexiconError(
+                "%s: pattern is not a valid regular expression once %s is "
+                "substituted: %s" % (sub, ANCHOR_PLACEHOLDER, exc)
+            ) from exc
+        glosses.append(gloss)
+
+    return Attachment(
+        rule=str(raw["rule"]),
+        forms=tuple(forms),
+        complement_categories=tuple(str(c) for c in categories),
+        complement_filler=_compile(filler_text, where),
+        complement_filler_pattern=filler_text,
+        gloss_constructions=tuple(glosses),
+        not_attached=str(raw["not_attached"]),
+    )
+
+
 def _load_basis_qualifiers(raw: Any, path: Path) -> tuple[BasisQualifier, ...]:
     """Load the declared re-basing vocabulary. Empty is not allowed.
 
@@ -683,6 +872,9 @@ def load_lexicon(path: str | os.PathLike | None = None) -> Lexicon:
             _require(raw, "unknown_term_policy", str(target)), target
         ),
         basis_qualifier_policy=_load_basis_qualifier_policy(
+            _require(raw, "basis_qualifier_policy", str(target)), target
+        ),
+        attachment=_load_attachment(
             _require(raw, "basis_qualifier_policy", str(target)), target
         ),
     )

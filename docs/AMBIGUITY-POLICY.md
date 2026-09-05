@@ -14,8 +14,9 @@ does it **parameterise** the term, or does it **refuse** with a
 
 The PID says two things that look contradictory.
 
-PID line 117 lists phrases that **must not be guessed**, and "large wick" is
-one of them. PID line 242 then builds acceptance Example B directly on
+PID line 114 lists "large wick" among the phrases that **must not be
+guessed** (the list runs from line 114 to line 118; line 117 is
+*"confirmation candle"*). PID line 242 then builds acceptance Example B directly on
 *"large 15m rejection wick"*, and PID line 288 requires that example to pass
 acceptance.
 
@@ -136,17 +137,70 @@ the same reason the rulings themselves are:
   *true range*, *standard deviation*, *twice the …*, *in pips*, *the other
   candles*, *its neighbours*).
 - **`basis_qualifier_policy.window`** — how much text is inspected: the
-  sentence the term sits in, plus the sentence after it. The window size is
-  the reviewable half of the guard, so it is declared rather than chosen in
-  code: widen it and more innocent prose refuses, narrow it and more
-  re-basing is missed.
+  sentence the term sits in, plus `sentences_after` sentences following it.
+  The window **bounds the search**; it does not decide the outcome.
+- **`basis_qualifier_policy.attachment`** — which of the qualifiers found
+  there actually count. This is the ruling that decides refusals, and it is
+  described in full in the next section.
 
-A term whose window contains a declared qualifier does not resolve. It
-becomes a `BLOCKING` unresolved item in a `STRATEGY_NOT_SUFFICIENTLY_DEFINED`
-result, naming the ruled basis, the constructions that displaced it, and the
-decision needed to settle which basis governs. Its `source_language` quotes
-the **full qualifying context**, not the matched phrase — quoting only "large
-wick" would hide the very words that caused the refusal.
+A term whose window contains a declared qualifier **that is attached to the
+ruled measurement** does not resolve. It becomes a `BLOCKING` unresolved item
+in a `STRATEGY_NOT_SUFFICIENTLY_DEFINED` result, naming the ruled basis, the
+constructions that displaced it, and the decision needed to settle which
+basis governs. Its `source_language` quotes the **full qualifying context**,
+not the matched phrase — quoting only "large wick" would hide the very words
+that caused the refusal.
+
+### What attaches a qualifier to a ruled term
+
+Finding a qualifier in the window is **not** enough to refuse. A qualifier
+re-bases a ruled term only when it is syntactically attached to the ruled
+measurement. Three declared forms attach, and nothing else does:
+
+| Form | What it is | Example |
+| --- | --- | --- |
+| `SLOT` | The qualifier sits in the term's own modifier slot — the `basis_slot` group every `PARAMETERISE` pattern must declare, being the run of words the pattern tolerates between its ruled adjective and its ruled head noun. Any category attaches here. | *"a large **ATR** wick"*, *"a larger **than average** wick"* |
+| `COMPLEMENT` | A `COMPARATIVE` qualifier stands as the term's own complement, separated from it only by declared filler. A comparative is the connective that binds a yardstick to a measurement. | *"a large wick **relative to** the recent average"* |
+| `GLOSS` | The source restates one of the term's **own matched words** and then defines it. Naming the ruled word is what attaches the gloss. | *"a large wick, and **by large I mean** twice the 14-period ATR"* |
+
+`SLOT` is why hits **inside** the term's matched span are inspected rather
+than discarded. A `PARAMETERISE` pattern contains a wildcard, and the wildcard
+is exactly where a re-basing lands: *"a larger than average wick"* matches
+`large_wick` **in its entirety**, so the qualifier falls inside the match.
+Dropping inside-span hits as "part of the ruled phrase the lexicon already
+declares" was false, and it made the guard's behaviour flip on word order —
+*"a wick larger than the average"* refused while the more natural *"a larger
+than average wick"* resolved.
+
+### What is deliberately **not** a re-basing
+
+The guard is tuned for **precision, not recall**. These are ordinary, correct
+trading descriptions, and every one of them resolves:
+
+| Source | Why it is not a re-basing |
+| --- | --- |
+| *"Enter on a large wick. The setup expires within 3 bars."* | The bar count is an **expiry**, which PID line 136 requires a package to state. |
+| *"Enter on a large wick. My stop is 2 ATR below entry."* | The ATR sizes the **stop**, not the wick. |
+| *"Enter on a large wick above the 200 period moving average."* | The average is a **trend filter**; the wick is placed against it, not measured by it. |
+| *"Enter on a large wick that clears the previous bars' high."* | The prior bar supplies a **price level**, not a yardstick. |
+
+Refusing these is not caution — it is a defect. The refusal advises
+*"restate the source without the re-basing language"*, which for *"expires
+within 3 bars"* means deleting an expiry the PID **requires**. And because
+`"after 4 bars"` matched the declared lookback pattern while `"after four
+15m bars"` did not, two sources with **identical meaning** produced opposite
+outcomes on a spelling difference; acceptance Example B passed only by that
+accident. `tests/test_ambiguity.py` now pins the pair to agree.
+
+**What makes precision safe here** is that the guard is not the only thing
+telling the truth. Every resolution it permits still carries
+`source_basis_agreement: NOT_VERIFIED`, which declines to certify that the
+source agrees with the ruled basis, and now also lists under
+`declared_qualifiers_seen_unattached` the qualifiers that were found and
+deliberately passed over. A precise guard beside an honest disclaimer is a
+coherent design. A recall-maximising guard that refuses required expiries is
+not — and its clean-scan stamp is *less* trustworthy, not more, because the
+filtering behind it is unprincipled.
 
 One term, one ruling: if any occurrence of a ruled term in a source is
 re-based, the term does not resolve anywhere in that source. Its parameter
@@ -159,15 +213,31 @@ This is a **surface-pattern check over a declared vocabulary inside a
 declared window**. It is not comprehension, and general detection of
 re-basing in natural language is not achievable this way.
 
+These are the real misses. Some are accidents of a surface vocabulary; the
+last group are **deliberate**, and they are listed here rather than implied
+away:
+
 - A re-basing phrased in words the vocabulary does not declare passes it.
-- A re-basing stated further away than the declared window passes it.
-- A construction it does recognise in innocent prose refuses a term that
-  should have resolved. That direction costs one round trip; the other costs
-  the audit trail, which is why the design leans this way.
+- A re-basing attached by a connective the `COMPLEMENT` form does not list
+  passes it.
+- A gloss phrased outside `gloss_constructions` passes it, and so does one
+  stated further away than `window.sentences_after`.
+- A re-basing that modifies the term from the **left** — *"an ATR-relative
+  large wick"* — passes it.
+- A yardstick that genuinely governs the term but reads, on the surface,
+  exactly like the location and expiry prose in the table above passes it
+  **on purpose**. That is the price of not refusing the four legitimate
+  sources listed there, and it is paid knowingly.
 
 So a term that survives the check is **not proven** to carry the ruled basis.
-It is a term in which no *declared* re-basing was found. That is a narrower
-claim, and it is the one the output now makes.
+It is a term in which no *attached* declared re-basing was found. That is a
+narrower claim, and it is the one the output now makes — which is why the
+scan result reads `NO_ATTACHED_REBASING_FOUND` and not
+`NO_DECLARED_REBASING_FOUND`. The older name asserted that the window held no
+declared re-basing at all, which is knowingly false whenever the guard passes
+over an ATR stop or a bar-count expiry: a stamp claiming more than the check
+established, which is the same class of defect as the `hsa_guessed: false`
+field this document already removed.
 
 ## Attribution: a parameterisation is never silent
 
@@ -271,6 +341,14 @@ sources resolve, so the lexicon moved again, from **1.1.0** to **1.2.0**.
 Same reasoning: a citation of a lexicon version is a claim about what the
 ruling said at that time.
 
+Replacing that vocabulary's fire-on-any-co-occurrence rule with the
+`attachment` ruling above changed which sources resolve again — in **both**
+directions, since it both stopped refusing legitimate expiries, stops and
+trend filters and started catching re-basings inside a term's own matched
+span. So the lexicon moved from **1.2.0** to **1.3.0**, and every
+`PARAMETERISE` pattern now declares a `basis_slot` group, which the loader
+requires rather than assumes.
+
 `strategies/wick_rejection_sequence/0.1.0` was ingested under lexicon 1.0.0
 and its provenance records the bounds that version declared — 0.3 to 0.9 and
 0.0 to 0.25. **That record is history and stays correct as written**: it says
@@ -281,6 +359,16 @@ edited to look like one — the package is a promoted-candidate artefact under
 trail this whole document exists to protect. A reader reconciling that
 package against today's lexicon should read the version numbers, not assume
 they match.
+
+That defence is deliberate and it holds, but it rests on a reader noticing a
+version number. So this paragraph is the **in-document superseded marker**:
+lexicon 1.0.0 is superseded three times over (1.1.0, 1.2.0, 1.3.0), and any
+draft or package citing it — `wick_rejection_sequence/0.1.0` is the only one
+in the inventory — records a ruling that has since moved. The marker is
+placed **here**, in the governing document, rather than written into the
+package: editing the package's own provenance to say it is stale would
+change a historical record, which is exactly what the paragraph above
+forbids.
 
 What is *not* history, and is enforced now, is that the package's embedded
 `rejection_wick 1.0.0` and `no_wick_candle 1.0.0` carry the same defaults and

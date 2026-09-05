@@ -1,12 +1,22 @@
 {
-  "$hsa_evidence": "strategy_evidence_index",
-  "$hsa_contract_version": "1.0.0",
+  "document_type": "hsa_strategy_evidence_index",
+  "document_note": "This is an inventory-local index, deliberately NOT an HSA contract kind: it carries no $hsa_kind, so no tool routes it to a schema it was never meant to satisfy. Each entry in references[] is a full cer_reference document and validates against contracts/cer_reference.schema.json on its own.",
   "strategy_id": "wick_rejection_sequence",
   "strategy_version": "0.1.0",
-  "source": "CONTRACT_FIXTURE",
-  "cer_live": false,
-  "description": "CER identity and evidence references for wick_rejection_sequence 0.1.0. CER owns evidence; HSA points at it (PID lines 160-181). CER is not live, so every reference below declares source CONTRACT_FIXTURE and stands in for real evidence (PID line 181). None of these is a result: no run has been executed and nothing here supports promotion. This file is not a permanent evidence store and holds no measurements \u2014 only references, in the shapes hsa/cer.py validates.",
+  "package": "strategies/wick_rejection_sequence/0.1.0/package.json",
   "generated_at_utc": "2026-09-04T00:00:00Z",
+  "cer_status": "NOT_LIVE",
+  "cer_status_note": "CER is not live (PID line 181). Every reference below declares source: CONTRACT_FIXTURE and carries FIXTURE- prefixed CER identities, so none of it can be mistaken for live evidence. These documents prove that HSA targets CER's identities and evidence semantics correctly. They prove NOTHING about this strategy: no run has been executed, no gate has been evaluated, and nothing here supports promotion. When CER goes live these are replaced at the hsa.cer.open_evidence_reader seam and never migrated into a parallel evidence store.",
+  "reference_types_present": [
+    "SOURCE_ANALYSIS",
+    "STRATEGY_HYPOTHESIS",
+    "VERSION_LINEAGE"
+  ],
+  "evidence_still_owed_before_promotion": [
+    "RESEARCH_FINDING references for the parameter sweeps required by package.evidence_requirements.backtest_requirements.",
+    "PROMOTION_EVIDENCE showing every acceptance criterion in package.acceptance_criteria met, on a sample of at least package.evidence_requirements.minimum_sample_size completed sequences.",
+    "A VERSION_LINEAGE reference against any successor version, which must be a separately versioned candidate rather than an edit to 0.1.0 (PID lines 185-189)."
+  ],
   "references": [
     {
       "$hsa_kind": "cer_reference",
@@ -50,10 +60,5 @@
       "recorded_at_utc": "2026-09-04T00:00:00Z",
       "supports": "INFORMATIONAL"
     }
-  ],
-  "evidence_still_owed_before_promotion": [
-    "RESEARCH_FINDING references for the parameter sweeps required by package.evidence_requirements.backtest_requirements.",
-    "PROMOTION_EVIDENCE showing every acceptance criterion in package.acceptance_criteria met, on a sample of at least package.evidence_requirements.minimum_sample_size completed sequences.",
-    "A VERSION_LINEAGE reference against any successor version, which must be a separately versioned candidate rather than an edit to 0.1.0 (PID lines 185-189)."
   ]
 }

@@ -167,23 +167,77 @@ def test_the_shape_is_decided_by_the_discriminator_not_the_filename(tmp_path):
     assert read_reference_documents(path) == [("$", document)]
 
 
-def test_the_two_governed_packages_use_different_envelopes(tmp_path):
-    """Detection must not depend on the container's own metadata keys.
+def test_detection_does_not_depend_on_the_containers_metadata_keys():
+    """What identifies a container is structure, not envelope vocabulary.
 
-    ``gold_context_breakout`` declares ``document_type`` and
-    ``wick_rejection_sequence`` declares ``$hsa_evidence``. Both are read,
-    because what identifies a container is the ABSENCE of ``$hsa_kind`` plus
-    the presence of the references array — not any envelope field.
+    Proved against SYNTHETIC containers rather than against the inventory.
+    This test used to assert that the two shipped evidence indexes have
+    DIFFERENT envelopes — which proved the point but also froze a real
+    inconsistency in place: one inventory convention with two shapes, only
+    one of them pinned. The property worth keeping is envelope-independence,
+    and arbitrary envelopes demonstrate it far better than two real files
+    that happen to disagree.
     """
-    envelopes = [
-        set(read_json_file(path)) - {EVIDENCE_CONTAINER_ARRAY}
-        for path in _inventory_evidence_files()
-    ]
-    assert len(envelopes) >= 2
-    assert envelopes[0] != envelopes[1], "these two happen to differ; that is the point"
-
     bare = {EVIDENCE_CONTAINER_ARRAY: []}
     assert is_evidence_container(bare)
+    for envelope in (
+        {"document_type": "hsa_strategy_evidence_index", "cer_status": "NOT_LIVE"},
+        {"$hsa_evidence": "strategy_evidence_index", "cer_live": False},
+        {"anything_at_all": 1, "and_another": ["x"]},
+    ):
+        document = dict(envelope, **{EVIDENCE_CONTAINER_ARRAY: []})
+        assert is_evidence_container(document), envelope
+
+    # And the absence of $hsa_kind really is the discriminator.
+    routable = {DISCRIMINATOR: KIND, EVIDENCE_CONTAINER_ARRAY: []}
+    assert not is_evidence_container(routable)
+
+
+def test_every_governed_evidence_index_uses_the_same_envelope():
+    """One inventory convention, one shape — and both of them pinned.
+
+    The two shipped indexes diverged: ``gold_context_breakout`` used
+    ``document_type``/``cer_status`` while ``wick_rejection_sequence`` used
+    ``$hsa_evidence``/``cer_live``, and only gold's was asserted anywhere. A
+    convention with two shapes is not a convention, and the unpinned half
+    could drift without failing anything.
+
+    Converged on gold's envelope deliberately. A container is emphatically
+    NOT a contract kind — that is why it carries no ``$hsa_kind`` and why
+    nothing routes it to a schema — and ``$hsa_``-prefixed keys are the
+    namespace the routable contract documents use. Naming a non-contract
+    document ``$hsa_evidence`` works against the very distinction the
+    container's own ``document_note`` explains.
+    """
+    paths = _inventory_evidence_files()
+    assert len(paths) >= 2, "this test needs at least two indexes to compare"
+
+    required = {
+        "document_type",
+        "document_note",
+        "strategy_id",
+        "strategy_version",
+        "package",
+        "generated_at_utc",
+        "cer_status",
+        "cer_status_note",
+        "reference_types_present",
+        EVIDENCE_CONTAINER_ARRAY,
+    }
+    for path in paths:
+        document = read_json_file(path)
+        keys = set(document)
+        assert required <= keys, (
+            "%s is missing evidence-index envelope keys: %s"
+            % (path, ", ".join(sorted(required - keys)))
+        )
+        assert document["document_type"] == "hsa_strategy_evidence_index", path
+        # No $hsa_-prefixed key at all: the container must never look routable.
+        assert not [key for key in keys if key.startswith("$hsa")], path
+        assert document["reference_types_present"] == sorted(
+            {reference["reference_type"] for reference in document[EVIDENCE_CONTAINER_ARRAY]}
+        ), path
+        assert document["strategy_id"] in str(path)
 
 
 def test_split_reports_the_json_path_of_every_reference():

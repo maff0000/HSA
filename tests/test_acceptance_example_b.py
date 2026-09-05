@@ -192,9 +192,15 @@ def test_criterion_3_both_discretionary_terms_are_parameterised_with_attribution
         assert resolution["hsa_invented_basis"] is False
         assert resolution["source_basis_agreement"] == "NOT_VERIFIED"
         scan = resolution["basis_conflict_scan"]
-        assert scan["result"] == "NO_DECLARED_REBASING_FOUND"
+        # NO_ATTACHED_REBASING_FOUND, not NO_DECLARED_REBASING_FOUND: the
+        # guard is precision-tuned and deliberately passes over declared
+        # qualifiers that attach to something other than the ruled
+        # measurement, so the stamp names what was actually established.
+        assert scan["result"] == "NO_ATTACHED_REBASING_FOUND"
         assert scan["qualifiers_declared"] > 0
         assert term["source_language"] in scan["inspected_text"]
+        assert scan["attachment_rule"].strip()
+        assert isinstance(scan["declared_qualifiers_seen_unattached"], list)
         assert resolution["authority"] == "HUMAN_ARCHITECT_RULING"
         assert resolution["ruling_document"] == RULING_DOCUMENT
         assert resolution["lexicon_term"] == term_id
@@ -963,8 +969,14 @@ def test_criterion_12_the_minimum_reference_types_are_present(package):
 def test_criterion_12_every_reference_is_labelled_a_contract_fixture(package, evidence):
     """PID line 181. A fixture mistaken for live evidence is the failure
     this labelling exists to prevent."""
-    assert evidence["source"] == "CONTRACT_FIXTURE"
-    assert evidence["cer_live"] is False
+    # The envelope key is ``cer_status``, not ``source``/``cer_live``: both
+    # governed evidence indexes now use one envelope. They used to differ —
+    # ``$hsa_evidence``/``cer_live`` here, ``document_type``/``cer_status``
+    # for gold — which meant one inventory convention with two shapes, only
+    # one of them pinned by a test. Converged on gold's, because a container
+    # is deliberately NOT a contract kind and ``$hsa_``-prefixed keys are the
+    # namespace routable contract documents use.
+    assert evidence["cer_status"] == "NOT_LIVE"
     for reference in package["cer_references"] + evidence["references"]:
         assert reference["source"] == "CONTRACT_FIXTURE"
         # Nothing here supports a promotion, because nothing has been run.

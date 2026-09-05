@@ -143,7 +143,7 @@
       "type": "file",
       "required": true,
       "pid": "PID.md:183-200 (promoted versions are immutable; a modification is a separately versioned candidate); PID.md:262 (acceptance criterion 13); PID.md:216 (current strategy inventory/version state)",
-      "why": "Acceptance criterion 13 requires a fresh boot to produce a separately versioned CANDIDATE rather than mutate a promoted strategy. This is the only artifact that states the lifecycle, the immutability rule and the derive_candidate mechanism that satisfies it, and three other required boot artifacts (docs/AMBIGUITY-POLICY.md, docs/CER-CONTRACT.md) already cite it as the authority on in-place edits. Leaving it out of the boot set meant a session could satisfy every other criterion and never be shown how to satisfy this one."
+      "why": "Acceptance criterion 13 requires a fresh boot to produce a separately versioned CANDIDATE rather than mutate a promoted strategy. This is the only artifact that states the lifecycle, the immutability rule and the derive_candidate mechanism that satisfies it, and three other required boot artifacts (docs/AMBIGUITY-POLICY.md, docs/CER-CONTRACT.md and docs/BOOT.md) already cite it as the authority on in-place edits. Leaving it out of the boot set meant a session could satisfy every other criterion and never be shown how to satisfy this one."
     },
     {
       "id": "cer-contract",

@@ -51,15 +51,19 @@ from hsa.semantics import Catalogue, check_package
 from hsa.versioning import (
     CARRIED_FORWARD_REFERENCE_TYPES,
     GATE_VERDICT_REFERENCE_TYPES,
+    PROMOTION_EVIDENCE_TYPE,
+    PROMOTION_PROVEN_BY_STATUS,
     STATUS_CANDIDATE,
     STATUS_PROMOTED,
-    SUPERSEDABLE_STATUSES,
+    STATUS_RETIRED,
     PromotedVersionImmutableError,
     VersioningError,
     apply_status_transition,
     derive_candidate,
     identity_of,
+    is_promoted,
     lineage,
+    promotion_evidence_of,
     refuse_in_place_mutation,
     status_of,
     supersedes_of,
@@ -171,23 +175,40 @@ def test_no_package_is_marked_promoted_without_live_cer_evidence():
     not live, so no package may carry a status that claims it passed a gate.
     The moment CER goes live and a real promotion happens, this test still
     passes — it asks for CER_LIVE promotion evidence, not for CANDIDATE.
+
+    It asks that only of the statuses that actually CLAIM promotion. RETIRED
+    does not: ``CANDIDATE -> RETIRED`` is a legitimate gate-free transition,
+    so a retired rejected candidate rightly carries no promotion evidence,
+    and demanding some of it would refuse an honest record. What is demanded
+    of every package instead is the second assertion: promotion evidence, if
+    present at all, must be CER_LIVE — otherwise a fixture-backed reference
+    could stand in for a gate that was never passed.
     """
     for path in _inventory_packages():
         package = read_json_file(path)
         status = status_of(package)
-        if status not in SUPERSEDABLE_STATUSES:
-            continue
-        promotion_evidence = [
-            reference
-            for reference in package.get("cer_references", [])
-            if reference.get("reference_type") == "PROMOTION_EVIDENCE"
-            and reference.get("source") == SOURCE_CER_LIVE
-        ]
-        assert promotion_evidence, (
-            "%s is %s but carries no CER_LIVE promotion evidence. A status is "
-            "not a gate: promotion is an evidence-gated act (PID line 189)."
-            % (path.relative_to(REPO), status)
-        )
+        where = path.relative_to(REPO)
+        if status in PROMOTION_PROVEN_BY_STATUS:
+            live = [
+                reference
+                for reference in promotion_evidence_of(package)
+                if reference.get("source") == SOURCE_CER_LIVE
+            ]
+            assert live, (
+                "%s is %s but carries no CER_LIVE promotion evidence. A "
+                "status is not a gate: promotion is an evidence-gated act "
+                "(PID line 189)." % (where, status)
+            )
+        for reference in package.get("cer_references", []):
+            if reference.get("reference_type") != PROMOTION_EVIDENCE_TYPE:
+                continue
+            assert reference.get("source") == SOURCE_CER_LIVE, (
+                "%s carries %s evidence sourced %r. Promotion is the one "
+                "verdict a contract fixture may not stand in for: it is what "
+                "freezes a version and what lets another version supersede it "
+                "(PID line 189)."
+                % (where, PROMOTION_EVIDENCE_TYPE, reference.get("source"))
+            )
 
 
 def test_any_superseding_version_the_inventory_holds_is_a_governed_derivation():
@@ -221,10 +242,19 @@ def test_any_superseding_version_the_inventory_holds_is_a_governed_derivation():
             "%s supersedes %s, which is not in the inventory: the superseded "
             "version is kept, never replaced in place" % (where, parent_identity)
         )
-        assert status_of(parent) in SUPERSEDABLE_STATUSES, (
-            "%s supersedes a version that was never promoted. A candidate is "
-            "not frozen, so it is edited directly rather than superseded "
+        assert is_promoted(parent), (
+            "%s supersedes a version that was never promoted. Note this asks "
+            "is_promoted (a fact about the parent's HISTORY), not whether its "
+            "status is frozen. The weaker status test passed a parent that "
+            "went CANDIDATE -> RETIRED without ever facing a gate, which is "
+            "the bypass this invariant exists to catch "
             "(docs/VERSIONING.md §3)." % where
+        )
+        assert status_of(parent) != STATUS_RETIRED or promotion_evidence_of(
+            parent
+        ), (
+            "%s supersedes a RETIRED version that carries no promotion "
+            "evidence; RETIRED alone never proves promotion" % where
         )
         assert status_of(package) == STATUS_CANDIDATE, (
             "%s supersedes an earlier version but is not a CANDIDATE; a "
@@ -452,3 +482,46 @@ def test_the_inventory_is_byte_identical_after_all_of_this(tmp_path, monkeypatch
         package
     )
     assert list(tmp_path.iterdir()) == [], "the exercise created files of its own"
+
+
+# --------------------------------------------------------------------------
+# the governing document must quote output the code actually produces
+# --------------------------------------------------------------------------
+
+
+def test_the_versioning_document_quotes_a_refusal_the_code_really_emits():
+    """A "captured output" block that nothing could produce is a fabrication.
+
+    ``docs/VERSIONING.md`` §4 previously showed a transcript naming
+    ``strategies/gold_context_breakout/1.0.0.json`` — a path that does not
+    exist — carrying a parenthesised source location that the two-argument
+    call shown above it cannot produce, over parameter and thesis values that
+    no longer matched the shipped package. Every part of it was stale.
+
+    Durable authority lives in Git and these documents ARE that authority
+    (PID line 206), so a document quoting the system is asserting something
+    about the system. This regenerates the refusal and requires the document
+    to contain it verbatim.
+    """
+    package = read_json_file(GOLD_1_0_0 / "package.json")
+    promoted = apply_status_transition(package, STATUS_PROMOTED)
+    proposed = copy.deepcopy(promoted)
+    proposed["parameters"][0]["default"] = 999
+    proposed["thesis"] = "Reworded thesis."
+
+    with pytest.raises(PromotedVersionImmutableError) as raised:
+        refuse_in_place_mutation(
+            promoted,
+            proposed,
+            source="strategies/gold_context_breakout/1.0.0/package.json",
+        )
+
+    document = (REPO / "docs" / "VERSIONING.md").read_text(encoding="utf-8")
+    for line in str(raised.value).splitlines():
+        assert line in document, (
+            "docs/VERSIONING.md no longer quotes what the code emits; this "
+            "line is missing:\n  %s" % line
+        )
+    # And the path it cites is a real file, not an invented one.
+    assert (GOLD_1_0_0 / "package.json").is_file()
+    assert "strategies/gold_context_breakout/1.0.0.json" not in document

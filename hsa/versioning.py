@@ -16,9 +16,10 @@ files, not a database.
 
 The public surface:
 
-    STATUSES / SUPERSEDABLE_STATUSES / ALLOWED_STATUS_TRANSITIONS
+    STATUSES / IMMUTABLE_STATUSES / ALLOWED_STATUS_TRANSITIONS
     parse_version(text) / format_version(parts) / bump_version(text, part)
-    status_of(package) / is_promoted(package)
+    status_of(package) / is_frozen(package) / is_promoted(package)
+    promotion_evidence_of(package)
     derive_candidate(promoted, rationale, ...)   -> new candidate package
     apply_status_transition(package, new_status) -> new package
     describe_in_place_mutation(promoted, proposed) -> list[Change]
@@ -45,7 +46,10 @@ __all__ = [
     "STATUS_DORMANT",
     "STATUS_RETIRED",
     "STATUSES",
-    "SUPERSEDABLE_STATUSES",
+    "IMMUTABLE_STATUSES",
+    "PROMOTION_PROVEN_BY_STATUS",
+    "PROMOTION_EVIDENCE_REQUIRED_STATUSES",
+    "PROMOTION_EVIDENCE_TYPE",
     "ALLOWED_STATUS_TRANSITIONS",
     "VERSION_PARTS",
     "CARRIED_FORWARD_REFERENCE_TYPES",
@@ -58,7 +62,9 @@ __all__ = [
     "format_version",
     "bump_version",
     "status_of",
+    "is_frozen",
     "is_promoted",
+    "promotion_evidence_of",
     "identity_of",
     "supersedes_of",
     "derive_candidate",
@@ -83,16 +89,41 @@ STATUSES: tuple[str, ...] = (
     STATUS_RETIRED,
 )
 
-#: Statuses that mean "this version has been through promotion". These are
-#: the immutable ones (PID line 185) and the only ones a candidate may
-#: legitimately supersede: the frozen schema describes ``supersedes`` as
-#: "the promoted version this candidate proposes to replace", and a version
-#: that was never promoted is not that.
-SUPERSEDABLE_STATUSES: tuple[str, ...] = (
+#: Statuses in which a version's CONTENT is frozen (PID line 185). This is
+#: about editing, not about supersession, and the two are no longer the same
+#: question — see PROMOTION_PROVEN_BY_STATUS below for why.
+IMMUTABLE_STATUSES: tuple[str, ...] = (
     STATUS_PROMOTED,
     STATUS_DORMANT,
     STATUS_RETIRED,
 )
+
+#: The CER reference type that records a version having passed the promotion
+#: gate. It is the only durable trace of promotion a package document can
+#: carry: the frozen ``lifecycle`` object holds a CURRENT status and nothing
+#: historical, and its ``additionalProperties: false`` forbids adding a
+#: ``promoted_at_utc`` of our own.
+PROMOTION_EVIDENCE_TYPE = "PROMOTION_EVIDENCE"
+
+
+def _statuses_reachable_without_promotion() -> frozenset[str]:
+    """Statuses a version can reach from CANDIDATE without being promoted.
+
+    Derived from ALLOWED_STATUS_TRANSITIONS rather than written down, so the
+    two can never drift apart. Add ``CANDIDATE -> DORMANT`` to the graph one
+    day and the promotion guard tightens by itself instead of silently going
+    stale, which is exactly how it went stale before.
+    """
+    reachable = {STATUS_CANDIDATE}
+    frontier = [STATUS_CANDIDATE]
+    while frontier:
+        current = frontier.pop()
+        for following in ALLOWED_STATUS_TRANSITIONS[current]:
+            if following == STATUS_PROMOTED or following in reachable:
+                continue
+            reachable.add(following)
+            frontier.append(following)
+    return frozenset(reachable)
 
 #: The only status changes allowed on an existing version. Everything else
 #: about a promoted version is frozen, but activation state must be able to
@@ -106,6 +137,27 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, tuple[str, ...]] = {
     STATUS_DORMANT: (STATUS_PROMOTED, STATUS_RETIRED),
     STATUS_RETIRED: (),
 }
+
+#: Frozen statuses that PROVE prior promotion on their own, because the
+#: transition graph offers no way to reach them except through PROMOTED.
+#: DORMANT qualifies: it is reachable only from PROMOTED.
+PROMOTION_PROVEN_BY_STATUS: tuple[str, ...] = tuple(
+    status
+    for status in IMMUTABLE_STATUSES
+    if status not in _statuses_reachable_without_promotion()
+)
+
+#: Frozen statuses that prove NOTHING about promotion, because a version can
+#: reach them without ever being promoted. RETIRED is the whole problem:
+#: ``CANDIDATE -> RETIRED`` is a legitimate, gate-free transition (a rejected
+#: candidate is retired, not deleted), so a RETIRED version may have been
+#: through the gates or may never have been near them. For these, promotion
+#: has to be established from EVIDENCE rather than read off the status.
+PROMOTION_EVIDENCE_REQUIRED_STATUSES: tuple[str, ...] = tuple(
+    status
+    for status in IMMUTABLE_STATUSES
+    if status in _statuses_reachable_without_promotion()
+)
 
 #: Semver components, in the order ``parse_version`` returns them.
 VERSION_PARTS: tuple[str, ...] = ("MAJOR", "MINOR", "PATCH")
@@ -315,9 +367,79 @@ def status_of(package: Any) -> str:
     return str(status)
 
 
+def is_frozen(package: Any) -> bool:
+    """True when this version's CONTENT may no longer be edited in place.
+
+    A question about the document, answered from the status alone. Note this
+    is NOT the same question as ``is_promoted``: a candidate that was
+    rejected and retired is frozen — a retired record stays a record — but it
+    never passed a gate, so nothing may supersede it.
+    """
+    return status_of(package) in IMMUTABLE_STATUSES
+
+
+def promotion_evidence_of(package: Any) -> tuple[Mapping, ...]:
+    """CER references recording THIS version having passed the promotion gate.
+
+    Anchored on identity, not just on type: a reference is evidence about the
+    strategy version it names (``cer_reference.schema.json`` requires both
+    ``strategy_id`` and ``strategy_version`` for exactly that reason), so a
+    promotion reference pointing at some other version proves nothing here.
+
+    ``source`` is deliberately not filtered. PID line 181 permits contract
+    fixtures while CER is not live, so refusing a fixture-backed promotion
+    here would refuse legitimate pre-CER work. Whether the evidence behind a
+    status is REAL is a separate and stricter question, asked of the shipped
+    inventory by ``tests/test_criterion_13_inventory.py``, which requires
+    CER_LIVE. This function answers "was this version promoted"; that test
+    answers "and was the promotion earned".
+    """
+    mapping = _require_mapping(package, "package")
+    strategy_id = mapping.get("strategy_id")
+    strategy_version = mapping.get("strategy_version")
+    references = mapping.get("cer_references")
+    if not isinstance(references, Sequence) or isinstance(references, (str, bytes)):
+        return ()
+    return tuple(
+        reference
+        for reference in references
+        if isinstance(reference, Mapping)
+        and reference.get("reference_type") == PROMOTION_EVIDENCE_TYPE
+        and reference.get("strategy_id") == strategy_id
+        and reference.get("strategy_version") == strategy_version
+    )
+
+
 def is_promoted(package: Any) -> bool:
-    """True when this version has been through promotion and is frozen."""
-    return status_of(package) in SUPERSEDABLE_STATUSES
+    """True when this version HAS BEEN through promotion.
+
+    Promotion is a fact about a version's HISTORY, not about its current
+    status, and conflating the two is what let a never-promoted version be
+    superseded. ``CANDIDATE -> RETIRED`` is a legitimate gate-free transition,
+    and ``RETIRED`` was previously read as "has been through promotion", so a
+    package could be created as a candidate, retired without ever facing a
+    gate, and then superseded by a derived 1.1.0 that validated cleanly.
+
+    So the answer is derived from evidence of history in two steps:
+
+    * statuses the transition graph makes unreachable except through
+      PROMOTED (``PROMOTION_PROVEN_BY_STATUS``) prove it on their own;
+    * the rest (``PROMOTION_EVIDENCE_REQUIRED_STATUSES``) prove nothing, and
+      need a PROMOTION_EVIDENCE reference anchored to this exact version.
+
+    The honest limit: a hand-written package can carry a PROMOTION_EVIDENCE
+    reference naming itself without any promotion having happened. That is
+    fabricating evidence, not bypassing a guard, and it is caught one level
+    up — the inventory invariant demands the evidence be CER_LIVE, and CER is
+    the authority on whether it resolves. What is closed here is the
+    bypass that needed no evidence at all.
+    """
+    status = status_of(package)
+    if status not in IMMUTABLE_STATUSES:
+        return False
+    if status in PROMOTION_PROVEN_BY_STATUS:
+        return True
+    return bool(promotion_evidence_of(package))
 
 
 def supersedes_of(package: Any) -> Mapping | None:
@@ -371,12 +493,37 @@ def derive_candidate(
     strategy_id, strategy_version = identity_of(mapping)
     status = status_of(mapping)
 
-    if status not in SUPERSEDABLE_STATUSES:
+    if status not in IMMUTABLE_STATUSES:
         raise VersioningError(
             "cannot derive a candidate from %s %s: it is %s, not a promoted "
             "version. A version that has never been promoted is not frozen, "
             "so it is edited directly rather than superseded (PID lines "
             "185-189)." % (strategy_id, strategy_version, status)
+        )
+
+    if not is_promoted(mapping):
+        raise VersioningError(
+            "cannot derive a candidate from %s %s: it is %s, and %s does not "
+            "mean the version was ever promoted — %s is reachable from "
+            "CANDIDATE without passing a gate, so a candidate that was "
+            "rejected and retired wears the same status as one that was "
+            "promoted and later retired. Promotion is a fact about a "
+            "version's history, not its current status, and the only durable "
+            "trace of it a package can carry is a %s CER reference anchored "
+            "to %s %s. This package carries none, so nothing here says the "
+            "gates were ever passed and there is no promoted version for a "
+            "candidate to supersede (PID line 189, acceptance criterion 13 at "
+            "PID line 262)."
+            % (
+                strategy_id,
+                strategy_version,
+                status,
+                status,
+                status,
+                PROMOTION_EVIDENCE_TYPE,
+                strategy_id,
+                strategy_version,
+            )
         )
 
     if not isinstance(rationale, str) or not rationale.strip():
@@ -506,8 +653,15 @@ def describe_in_place_mutation(
     """Return the changes that would mutate a promoted version in place.
 
     An empty list means ``proposed`` is not an in-place mutation: either it
-    is a different version, or the version it shares has never been
-    promoted, or the only difference is a permitted status transition.
+    is a different version, or the version it shares is not frozen, or the
+    only difference is a permitted status transition.
+
+    The question here is ``is_frozen``, not ``is_promoted``. A candidate that
+    was rejected and retired may not be superseded — nothing promoted it —
+    but its content is still frozen, because a retired record is a record.
+    Reading the supersession rule onto editing would have quietly made
+    retired candidates editable in place, which is a different defect, not a
+    fix for the first one.
 
     Raises ``VersioningError`` if the two documents are not the same
     strategy — comparing unrelated strategies is a caller mistake, and
@@ -523,7 +677,7 @@ def describe_in_place_mutation(
         )
     if left_version != right_version:
         return []
-    if status_of(promoted) not in SUPERSEDABLE_STATUSES:
+    if not is_frozen(promoted):
         return []
 
     differences = _diff(dict(promoted), dict(proposed))

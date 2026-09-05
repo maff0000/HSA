@@ -125,10 +125,10 @@ promotion through its own evidence gates.
 | `CANDIDATE` | Proposed. No evidence gate has been passed. |
 | `PROMOTED` | Passed its gates. **Immutable from this point.** |
 | `DORMANT` | Promoted, and currently outside the market shape it was proven in. A normal resting state, **not a failure** (`PID.md:195`). |
-| `RETIRED` | Withdrawn. Kept on the record; rejection is a governed outcome, not a deleted experiment. |
+| `RETIRED` | Withdrawn. Kept on the record; rejection is a governed outcome, not a deleted experiment. Reachable from `CANDIDATE` as well as from `PROMOTED`, so it says **nothing** about whether a version was ever promoted — see below. |
 
 Dormancy is not a reason to tune. Do not tune a strategy merely to restore
-trade frequency (`PID.md:197`), and do not force one to trade outside its
+trade frequency (`PID.md:196`), and do not force one to trade outside its
 preferred market shape (`PID.md:194`). Prefer many independently proven
 specialists over one strategy stretched to cover everything.
 
@@ -191,8 +191,17 @@ inventory holds one version of one strategy, and that is not an oversight:
 
 `hsa.versioning.derive_candidate` **refuses a parent that was never
 promoted**, because a version that has not been through the gates is not
-frozen, so it is edited directly rather than superseded
-(`docs/VERSIONING.md` §3). `gold_context_breakout` 1.0.0 is a `CANDIDATE`,
+something to supersede (`docs/VERSIONING.md` §3).
+
+That refusal is decided from the parent's **history**, not from its current
+status. `PROMOTED` and `DORMANT` prove promotion on their own — the lifecycle
+graph offers no way to reach `DORMANT` except through `PROMOTED` — while
+`RETIRED` proves nothing, because `CANDIDATE -> RETIRED` is a legitimate
+gate-free transition, and so requires a `PROMOTION_EVIDENCE` CER reference
+anchored to that exact version. Reading "never promoted" off the status
+instead was a real bypass: a package could be created as a candidate, retired
+without facing a gate, and then superseded by a derived `1.1.0` that
+validated cleanly. `gold_context_breakout` 1.0.0 is a `CANDIDATE`,
 and it cannot honestly become anything else: its own `acceptance_criteria`
 require at least 100 qualifying matches with a measured expectancy against an
 ungated control arm, and HSA has no backtester, no market data and no live

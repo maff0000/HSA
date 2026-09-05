@@ -573,3 +573,66 @@ def test_boot_md_shows_what_a_real_boot_actually_reports():
     # boot entry cannot land without the sample being regenerated.
     for artifact in report["artifacts"]:
         assert artifact["path"] in boot_md, artifact["path"]
+
+
+# --------------------------------------------------------------------------
+# governed documents must be self-consistent
+# --------------------------------------------------------------------------
+#
+# PID line 206 makes these documents the durable authority. A document that
+# cross-references a section it does not have, or counts artifacts it then
+# fails to name, is asserting something untrue about the very structure a
+# fresh boot is meant to load from it. Both were real: the Blueprint cited
+# a non-existent SS6.3 and SS7.2, and boot-manifest.json said "three other
+# required boot artifacts" and then named two.
+
+
+def test_every_blueprint_section_cross_reference_resolves():
+    """A SSN.M pointing at nothing sends a booting session to a dead end."""
+    import re
+
+    blueprint = REPO_ROOT / "docs" / "HELIOS-STRATEGY-BLUEPRINT.md"
+    text = blueprint.read_text(encoding="utf-8")
+
+    headings = set()
+    for line in text.splitlines():
+        match = re.match(r"^#{2,4}\s+(\d+(?:\.\d+)*)\.?\s+\S", line)
+        if match:
+            headings.add(match.group(1))
+    assert headings, "no numbered headings found; this test would be vacuous"
+
+    referenced = set(re.findall(r"\u00a7(\d+(?:\.\d+)*)", text))
+    assert referenced, "no section cross-references found; this test would be vacuous"
+
+    missing = sorted(referenced - headings, key=lambda s: [int(p) for p in s.split(".")])
+    assert not missing, (
+        "docs/HELIOS-STRATEGY-BLUEPRINT.md cross-references sections that do "
+        "not exist: %s (it has %s)"
+        % (", ".join(missing), ", ".join(sorted(headings)))
+    )
+
+
+def test_boot_manifest_rationales_name_as_many_artifacts_as_they_count():
+    """"three other required boot artifacts (X, Y)" is a document overstating itself."""
+    import re
+
+    words = {
+        "one": 1, "two": 2, "three": 3, "four": 4,
+        "five": 5, "six": 6, "seven": 7, "eight": 8,
+    }
+    manifest = json.loads(
+        (REPO_ROOT / "docs" / "boot-manifest.json").read_text(encoding="utf-8")
+    )
+    for artifact in manifest["artifacts"]:
+        why = artifact.get("why", "")
+        for match in re.finditer(
+            r"\b(%s)\s+other\s+required\s+boot\s+artifacts\b\s*\(([^)]*)\)"
+            % "|".join(words),
+            why,
+        ):
+            claimed = words[match.group(1)]
+            named = len(re.findall(r"[\w./-]+\.(?:md|json)\b", match.group(2)))
+            assert named == claimed, (
+                "%s claims %d other boot artifacts but names %d: %r"
+                % (artifact.get("path"), claimed, named, match.group(0))
+            )

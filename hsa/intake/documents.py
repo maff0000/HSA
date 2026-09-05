@@ -165,6 +165,18 @@ def _resolution_provenance(finding: TermFinding, analysis: Analysis) -> dict:
     was actually run recorded beside it). The old name was REMOVED rather
     than redefined so a consumer still reading it fails loudly instead of
     reading a changed meaning out of a familiar key.
+
+    WHY THE RESULT IS ``NO_ATTACHED_REBASING_FOUND`` AND NOT
+    ``NO_DECLARED_REBASING_FOUND``. The old name was the same class of
+    overclaim, one level down. The guard is deliberately tuned for precision:
+    it finds declared qualifiers it then declines to treat as re-basing,
+    because they attach to something other than the ruled measurement — an
+    ATR stop, a bar-count expiry, a moving-average trend filter. Stamping
+    "no declared re-basing found" over a scan that found several and passed
+    over them on purpose is a document asserting more than the code
+    enforces. The name now says what was actually established, and
+    ``declared_qualifiers_seen_unattached`` lists what was passed over, so
+    the judgement is reviewable instead of invisible.
     """
     lexicon = analysis.lexicon
     policy = lexicon.basis_qualifier_policy
@@ -180,12 +192,27 @@ def _resolution_provenance(finding: TermFinding, analysis: Analysis) -> dict:
         "hsa_invented_basis": False,
         "source_basis_agreement": "NOT_VERIFIED",
         "basis_conflict_scan": {
-            "result": "NO_DECLARED_REBASING_FOUND",
+            "result": "NO_ATTACHED_REBASING_FOUND",
             "vocabulary": "%s basis_qualifiers" % lexicon.source_path.name,
             "lexicon_version": lexicon.version,
             "qualifiers_declared": len(lexicon.basis_qualifiers),
             "window_rule": policy["window"]["description"],
+            "attachment_rule": lexicon.attachment.rule,
             "inspected_text": finding.scanned_text,
+            "declared_qualifiers_seen_unattached": [
+                {
+                    "qualifier_id": hit.qualifier.qualifier_id,
+                    "category": hit.qualifier.category,
+                    "phrase": " ".join(hit.occurrence.text.split()),
+                    "location": hit.occurrence.describe(),
+                    "not_treated_as_rebasing_because": (
+                        "it is not attached to the ruled measurement by any "
+                        "declared attachment form (SLOT, COMPLEMENT, GLOSS); "
+                        "it modifies something else in the surrounding text"
+                    ),
+                }
+                for hit in finding.unattached
+            ],
             "limits": policy["limits"],
         },
         "default_status": "PROVISIONAL_PENDING_EVIDENCE",
@@ -454,9 +481,13 @@ def build_draft(
             "by CER evidence before promotion.",
             "Each resolution records a basis_conflict_scan: the declared "
             "re-basing vocabulary was scanned over the declared window and "
-            "found nothing. That is NOT proof the source meant the ruled "
-            "basis, which is why source_basis_agreement reads NOT_VERIFIED "
-            "and why no hsa_guessed field is emitted (docs/AMBIGUITY-POLICY.md, "
+            "nothing was found ATTACHED to the ruled measurement. Declared "
+            "qualifiers that were found and deliberately not treated as "
+            "re-basing are listed there under "
+            "declared_qualifiers_seen_unattached, so the call is reviewable. "
+            "A clean scan is NOT proof the source meant the ruled basis, "
+            "which is why source_basis_agreement reads NOT_VERIFIED and why "
+            "no hsa_guessed field is emitted (docs/AMBIGUITY-POLICY.md, "
             "'A ruled term can be re-based by its context').",
         ],
     }

@@ -20,6 +20,11 @@ from hsa.versioning import (
     ALLOWED_STATUS_TRANSITIONS,
     CARRIED_FORWARD_REFERENCE_TYPES,
     GATE_VERDICT_REFERENCE_TYPES,
+    ALLOWED_STATUS_TRANSITIONS as TRANSITIONS,
+    IMMUTABLE_STATUSES,
+    PROMOTION_EVIDENCE_REQUIRED_STATUSES,
+    PROMOTION_EVIDENCE_TYPE,
+    PROMOTION_PROVEN_BY_STATUS,
     STATUS_CANDIDATE,
     STATUS_DORMANT,
     STATUS_PROMOTED,
@@ -32,8 +37,10 @@ from hsa.versioning import (
     describe_in_place_mutation,
     format_version,
     identity_of,
+    is_frozen,
     is_promoted,
     lineage,
+    promotion_evidence_of,
     parse_version,
     refuse_in_place_mutation,
     status_of,
@@ -124,16 +131,168 @@ def test_status_is_never_guessed(valid_doc):
         status_of(package)
 
 
-def test_is_promoted_covers_every_post_promotion_status(promoted_package):
+def _with_promotion_evidence(package: dict) -> dict:
+    """The package plus a CER reference recording ITS OWN promotion.
+
+    Anchored to the package's own identity, because that is what makes it
+    evidence about this version rather than about some other one.
+    """
+    promoted = copy.deepcopy(package)
+    strategy_id, strategy_version = identity_of(promoted)
+    promoted.setdefault("cer_references", []).append(
+        {
+            "$hsa_kind": "cer_reference",
+            "strategy_id": strategy_id,
+            "strategy_version": strategy_version,
+            "evidence_id": "FIXTURE-EVID-PROMOTION-GATE",
+            "reference_type": PROMOTION_EVIDENCE_TYPE,
+            "source": "CONTRACT_FIXTURE",
+            "recorded_at_utc": "2026-01-01T00:00:00Z",
+            "supports": "PROMOTION",
+        }
+    )
+    return promoted
+
+
+# --------------------------------------------------------------------------
+# promotion is a fact about HISTORY, not about current status
+# --------------------------------------------------------------------------
+
+
+def test_the_promotion_status_split_is_derived_from_the_transition_graph():
+    """Not written down twice, so the two cannot drift apart.
+
+    A status proves prior promotion only if the graph offers no way to reach
+    it except through PROMOTED. Asserting the derivation here means adding a
+    transition to the graph without thinking about promotion fails loudly
+    rather than quietly widening what may be superseded.
+    """
+    assert set(PROMOTION_PROVEN_BY_STATUS) | set(
+        PROMOTION_EVIDENCE_REQUIRED_STATUSES
+    ) == set(IMMUTABLE_STATUSES)
+    assert not set(PROMOTION_PROVEN_BY_STATUS) & set(
+        PROMOTION_EVIDENCE_REQUIRED_STATUSES
+    )
+    # DORMANT is reachable only from PROMOTED, so it proves promotion.
+    assert STATUS_DORMANT in PROMOTION_PROVEN_BY_STATUS
+    assert all(
+        STATUS_DORMANT not in following
+        for status, following in TRANSITIONS.items()
+        if status != STATUS_PROMOTED
+    )
+    # RETIRED is reachable straight from CANDIDATE, so it proves nothing.
+    assert STATUS_RETIRED in PROMOTION_EVIDENCE_REQUIRED_STATUSES
+    assert STATUS_RETIRED in TRANSITIONS[STATUS_CANDIDATE]
+
+
+def test_is_promoted_holds_for_the_statuses_the_graph_proves(promoted_package):
     assert is_promoted(promoted_package)
     assert is_promoted(apply_status_transition(promoted_package, STATUS_DORMANT))
-    assert is_promoted(apply_status_transition(promoted_package, STATUS_RETIRED))
+
+
+def test_retired_alone_does_not_mean_a_version_was_ever_promoted(promoted_package):
+    """The corrected expectation. This assertion used to read the other way.
+
+    ``is_promoted`` on a RETIRED package used to be True unconditionally,
+    which is what made the bypass below possible: RETIRED is reachable from
+    CANDIDATE without passing a gate, so the status cannot carry the claim.
+    A package that reaches RETIRED legitimately, from PROMOTED, records the
+    promotion that got it there; one that never faced a gate has nothing to
+    record, and the two are told apart by evidence rather than by status.
+    """
+    retired = apply_status_transition(promoted_package, STATUS_RETIRED)
+    assert not promotion_evidence_of(retired)
+    assert not is_promoted(retired)
+    # With the promotion it actually passed on the record, it is promoted.
+    assert is_promoted(_with_promotion_evidence(retired))
+
+
+def test_promotion_evidence_must_be_anchored_to_this_very_version(promoted_package):
+    """Evidence about another version proves nothing about this one."""
+    retired = apply_status_transition(promoted_package, STATUS_RETIRED)
+    misanchored = copy.deepcopy(retired)
+    misanchored["cer_references"].append(
+        {
+            "$hsa_kind": "cer_reference",
+            "strategy_id": "gold_context_breakout",
+            "strategy_version": "9.9.9",
+            "evidence_id": "FIXTURE-EVID-OTHER-VERSION",
+            "reference_type": PROMOTION_EVIDENCE_TYPE,
+            "source": "CONTRACT_FIXTURE",
+            "recorded_at_utc": "2026-01-01T00:00:00Z",
+            "supports": "PROMOTION",
+        }
+    )
+    assert not promotion_evidence_of(misanchored)
+    assert not is_promoted(misanchored)
+
+
+def test_a_never_promoted_version_cannot_be_retired_then_superseded(valid_doc):
+    """The bypass, closed. Reproduced with documented public API only.
+
+    CANDIDATE -> RETIRED is a legitimate, gate-free transition: a rejected
+    candidate is retired, not deleted. Reading RETIRED as "has been through
+    promotion" then let that retired candidate be superseded by a derived
+    1.1.0 which validated cleanly against the frozen schema — a separately
+    versioned candidate superseding a version that never passed a gate, which
+    is precisely what acceptance criterion 13 exists to prevent.
+    """
+    package = valid_doc("strategy_package")
+    assert status_of(package) == STATUS_CANDIDATE
+    retired = apply_status_transition(package, STATUS_RETIRED)
+    assert status_of(retired) == STATUS_RETIRED
+
+    with pytest.raises(VersioningError) as raised:
+        derive_candidate(retired, RATIONALE)
+
+    rendered = str(raised.value)
+    assert "does not mean the version was ever promoted" in rendered
+    assert PROMOTION_EVIDENCE_TYPE in rendered
+
+
+def test_a_genuinely_promoted_then_retired_version_may_still_be_superseded(
+    promoted_package,
+):
+    """The fix must not refuse the legitimate case it looks like.
+
+    Retiring a promoted strategy does not un-promote it, and a candidate may
+    still be derived from it — dormancy and retirement are lifecycle states,
+    not erasures of history (PID lines 195, 197).
+    """
+    retired = _with_promotion_evidence(
+        apply_status_transition(promoted_package, STATUS_RETIRED)
+    )
+    candidate = derive_candidate(retired, RATIONALE)
+    assert candidate["strategy_version"] == "1.1.0"
+    assert candidate["lifecycle"]["supersedes"]["strategy_version"] == "1.0.0"
+    assert validate_document(candidate) == "strategy_package"
+
+
+def test_a_retired_candidate_is_still_frozen_even_though_nothing_may_supersede_it(
+    valid_doc,
+):
+    """The two questions are separate, and narrowing one must not widen the other.
+
+    A rejected candidate that was retired may not be superseded, because it
+    never passed a gate. Its CONTENT is still frozen: a retired record is a
+    record. Answering the editing question with the supersession rule would
+    have made retired candidates quietly editable in place.
+    """
+    retired = apply_status_transition(valid_doc("strategy_package"), STATUS_RETIRED)
+    assert is_frozen(retired)
+    assert not is_promoted(retired)
+
+    edited = copy.deepcopy(retired)
+    edited["title"] = "quietly edited in place"
+    with pytest.raises(PromotedVersionImmutableError):
+        refuse_in_place_mutation(retired, edited)
 
 
 def test_a_candidate_is_not_promoted(valid_doc):
     package = valid_doc("strategy_package")
     assert status_of(package) == STATUS_CANDIDATE
     assert not is_promoted(package)
+    assert not is_frozen(package)
 
 
 # --------------------------------------------------------------------------

@@ -148,11 +148,22 @@ def test_a_parameterisation_is_never_silent():
     assert resolution["hsa_invented_basis"] is False
     assert resolution["source_basis_agreement"] == "NOT_VERIFIED"
     # And what WAS checked is recorded, including what it does not cover.
+    #
+    # The stamp says NO_ATTACHED_REBASING_FOUND, not the old
+    # NO_DECLARED_REBASING_FOUND. The old name was the same overclaim as
+    # ``hsa_guessed`` one level down: the guard is tuned for precision and
+    # routinely FINDS declared qualifiers it then declines to treat as
+    # re-basing, so "no declared re-basing found" was a specific falsehood
+    # about a scan that had found some and passed over them on purpose.
     scan = resolution["basis_conflict_scan"]
-    assert scan["result"] == "NO_DECLARED_REBASING_FOUND"
+    assert scan["result"] == "NO_ATTACHED_REBASING_FOUND"
     assert scan["qualifiers_declared"] > 0
     assert entry["source_language"] in scan["inspected_text"]
     assert "not proven" in scan["limits"].lower() or "nothing more" in scan["limits"].lower()
+    # The attachment ruling that produced this verdict is named, and the
+    # qualifiers it saw and passed over are listed rather than dropped.
+    assert scan["attachment_rule"].strip()
+    assert isinstance(scan["declared_qualifiers_seen_unattached"], list)
     # The basis is ratified; the default is not. Saying so is what keeps a
     # provisional number from hardening into an unexamined decision.
     assert resolution["default_status"] == "PROVISIONAL_PENDING_EVIDENCE"
@@ -340,6 +351,258 @@ def test_a_plain_ruled_term_with_no_rebasing_still_parameterises():
         assert result.sufficiently_defined, name
         ids = {entry["term_id"] for entry in result.document["resolved_terms"]}
         assert {"large_wick", "no_wick_candle"} <= ids, name
+
+
+# --- the guard is precise: it fires when attached, and only then -------------
+#
+# The guard's first form maximised RECALL — any declared qualifier anywhere in
+# the window re-based the term. That refused ordinary, correct trading prose:
+# an ATR stop, a bar-count expiry the PID itself REQUIRES a package to state,
+# a moving-average trend filter, a prior-bar price reference. A guard that
+# refuses valid strategies is a defect, not caution, so it was rebuilt around
+# ATTACHMENT: a qualifier re-bases the ruled term only when it modifies that
+# term, complements it, or glosses its own word.
+#
+# What makes precision safe here is that the guard is not the only thing
+# telling the truth. Every resolution it permits still carries
+# source_basis_agreement NOT_VERIFIED and now lists the declared qualifiers it
+# saw and passed over, so the residual risk is stated rather than hidden.
+
+
+def _analyse_text(text: str, lex):
+    return analyse(text, lex)
+
+
+def _refuses(text: str, lex) -> bool:
+    """True when the source refuses, by any route intake actually uses."""
+    request = build_request(text, "TRADER_EXPLANATION", "unit test")
+    return not intake(request, lexicon=lex, generated_at_utc=STAMP).sufficiently_defined
+
+
+#: Ordinary trading prose that must RESOLVE. Every one of these was refused by
+#: the recall-maximising guard, and the refusal advised "restate the source
+#: without the re-basing language" — which for an expiry means deleting the
+#: expiry PID line 136 requires.
+LEGITIMATE_SOURCES = [
+    ("expiry_within_bars", "Enter on a large wick. The setup expires within 3 bars."),
+    ("atr_sized_stop", "Enter on a large wick. My stop is 2 ATR below entry."),
+    (
+        "moving_average_trend_filter",
+        "Enter on a large wick above the 200 period moving average.",
+    ),
+    (
+        "prior_bar_price_reference",
+        "Enter on a large wick that clears the previous bars' high.",
+    ),
+    ("expiry_spelled_out", "Enter on a large wick. Setup expires after four 15m bars."),
+    ("expiry_in_digits", "Enter on a large wick. Setup expires after 4 bars."),
+]
+
+
+@pytest.mark.parametrize(("name", "source"), LEGITIMATE_SOURCES)
+def test_a_legitimate_strategy_description_is_not_refused(name, source, lexicon):
+    """A guard that refuses valid strategies is a different defect, not a fix."""
+    assert not _refuses(source, lexicon), name
+
+
+def test_the_same_expiry_spelled_two_ways_behaves_the_same(lexicon):
+    """The clearest statement of the over-correction, kept as a regression.
+
+    "after 4 bars" and "after four 15m bars" mean the same thing. Under the
+    recall-maximising guard the first was refused and the second resolved,
+    because the declared lookback pattern happens to match digits and not
+    words. Example B passed acceptance on that accident of spelling. Identical
+    meaning must not produce opposite outcomes on a spelling difference, in
+    either direction — so this asserts they AGREE, not that they resolve.
+    """
+    digits = "Enter on a large wick. Setup expires after 4 bars."
+    words = "Enter on a large wick. Setup expires after four 15m bars."
+    assert _refuses(digits, lexicon) == _refuses(words, lexicon)
+    assert not _refuses(digits, lexicon)
+
+
+#: Genuine re-basings, which must still refuse. The first two are the R4
+#: fixtures' constructions; the rest land inside the term's own matched span,
+#: where the pattern's wildcard sits.
+GENUINE_REBASINGS = [
+    ("complement_comparative", "Enter on a large wick relative to the recent average."),
+    (
+        "gloss_of_the_ruled_word",
+        "I enter on a large wick, and by large I mean twice the 14-period ATR.",
+    ),
+    ("slot_volatility", "I enter on a large atr wick."),
+    ("slot_recent", "I enter on a large recent wick."),
+    ("slot_average", "I enter on a large average wick."),
+    ("slot_comparative", "I enter on a bigger than atr wick."),
+]
+
+
+@pytest.mark.parametrize(("name", "source"), GENUINE_REBASINGS)
+def test_a_genuine_rebasing_still_refuses(name, source, lexicon):
+    assert _refuses(source, lexicon), name
+
+
+def test_a_qualifier_inside_the_terms_own_matched_span_is_not_ignored(lexicon):
+    """Blocker 2: the wildcard slot is exactly where a re-basing lands.
+
+    Hits falling inside the matched span used to be dropped as "part of the
+    ruled phrase the lexicon already declares". That is false for any pattern
+    with a wildcard: ``large_wick`` tolerates up to three words between its
+    adjective and its head noun, so "a larger than average wick" matched
+    ENTIRELY, the qualifier fell inside the match, and the term resolved while
+    stamping a scan result claiming no re-basing was found.
+    """
+    source = "I enter when I see a larger than average wick on the 15m."
+    analysis = _analyse_text(source, lexicon)
+    assert analysis.rebased_findings, "the re-basing inside the span was missed"
+    finding = analysis.rebased_findings[0]
+    assert finding.term.term_id == "large_wick"
+    assert any(hit.attachment == "SLOT" for hit in finding.hits)
+    # And it is not silently resolved anywhere.
+    assert not [f for f in analysis.term_findings if f.term.term_id == "large_wick"]
+
+
+def test_the_guard_does_not_depend_on_word_order(lexicon):
+    """The pair whose behaviour flipped on word order, both refusing now.
+
+    The failing direction was the MORE natural phrasing, which is what made
+    the gap easy to walk into.
+    """
+    qualifier_inside = "I enter when I see a larger than average wick on the 15m."
+    qualifier_after = "I enter when I see a wick larger than the average."
+    assert _refuses(qualifier_inside, lexicon)
+    assert _refuses(qualifier_after, lexicon)
+
+
+def test_a_resolution_names_the_qualifiers_it_saw_and_passed_over(lexicon):
+    """Precision is only honest if the judgement is visible.
+
+    The guard deliberately declines to re-base on an ATR that sizes a stop.
+    Saying nothing about it would make the clean scan look like an empty one;
+    the artifact has to show what was found and why it did not count.
+    """
+    request = build_request(
+        "Enter on a large wick. My stop is 2 ATR below entry.",
+        "TRADER_EXPLANATION",
+        "unit test",
+    )
+    result = intake(request, lexicon=lexicon, generated_at_utc=STAMP)
+    assert result.sufficiently_defined
+    entry = next(
+        e for e in result.document["resolved_terms"] if e["term_id"] == "large_wick"
+    )
+    scan = entry["resolution"]["basis_conflict_scan"]
+    assert scan["result"] == "NO_ATTACHED_REBASING_FOUND"
+    seen = scan["declared_qualifiers_seen_unattached"]
+    assert any(hit["qualifier_id"] == "volatility_basis" for hit in seen), seen
+    assert all(hit["not_treated_as_rebasing_because"].strip() for hit in seen)
+
+
+def test_the_attachment_ruling_is_declared_data_not_code(lexicon):
+    """Reviewable without reading Python, like every other ruling here."""
+    attachment = lexicon.attachment
+    assert attachment.rule.strip()
+    assert {entry["form"] for entry in attachment.forms} == {
+        "SLOT",
+        "COMPLEMENT",
+        "GLOSS",
+    }
+    assert attachment.complement_categories == ("COMPARATIVE",)
+    assert attachment.gloss_constructions
+    # The limits say what is NOT caught, in the open, rather than implying
+    # completeness the guard cannot deliver.
+    limits = lexicon.basis_qualifier_policy["limits"].lower()
+    assert "precision" in limits
+    assert "known misses" in limits
+    # And the prose names the ordinary constructions it deliberately allows.
+    not_attached = attachment.not_attached.lower()
+    for construction in ("stop", "expir", "moving average"):
+        assert construction in not_attached, construction
+
+
+def test_a_parameterise_pattern_without_a_declared_slot_is_refused_at_load(tmp_path):
+    """The slot must be declared, or Blocker 2 comes straight back.
+
+    A PARAMETERISE pattern with a wildcard but no ``basis_slot`` group would
+    leave the guard unable to see inside its own match, and a re-basing landing
+    in the wildcard would resolve silently. That has to fail the load, not
+    degrade quietly.
+    """
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    term = next(t for t in source["terms"] if t["disposition"] == PARAMETERISE)
+    term["pattern"] = term["pattern"].replace("(?P<basis_slot>", "(?:")
+    broken = tmp_path / "no_slot.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="basis_slot"):
+        load_lexicon(broken)
+
+
+def _lexicon_with_sentences_after(tmp_path, value: int):
+    source = json.loads(
+        (REPO_ROOT / "hsa" / "intake" / "lexicon.json").read_text(encoding="utf-8")
+    )
+    source["basis_qualifier_policy"]["window"]["sentences_after"] = value
+    target = tmp_path / ("window_%d.json" % value)
+    target.write_text(json.dumps(source), encoding="utf-8")
+    return load_lexicon(target)
+
+
+def test_the_declared_window_size_actually_changes_what_the_guard_sees(tmp_path):
+    """``sentences_after`` is a declared tunable; prove it is a live one.
+
+    It was previously untested as a VALUE: setting it to 0 or to 99 left the
+    whole suite green, and the only assertion on it was that it is an int. A
+    declared knob nothing exercises is indistinguishable from a dead one.
+
+    With the guard tuned for precision, this number governs exactly one thing:
+    how far a GLOSS may sit from the term it re-defines. SLOT and COMPLEMENT
+    attachment cannot cross a sentence terminator, so the window cannot affect
+    them. The lexicon's own window description states that, and this is the
+    behaviour behind the statement.
+    """
+    trailing_gloss = "Enter on a large wick. By large I mean twice the ATR."
+    inline = "Enter on a large wick relative to the recent average."
+
+    narrow = _lexicon_with_sentences_after(tmp_path, 0)
+    wide = _lexicon_with_sentences_after(tmp_path, 1)
+
+    # The next-sentence gloss is reachable only with the window open.
+    assert not analyse(trailing_gloss, narrow).rebased_findings
+    assert analyse(trailing_gloss, wide).rebased_findings
+
+    # Attachment inside the term's own sentence is unaffected by the window.
+    assert analyse(inline, narrow).rebased_findings
+    assert analyse(inline, wide).rebased_findings
+
+
+def test_the_shipped_window_is_wide_enough_for_the_case_it_documents(lexicon):
+    """The lexicon cites the trailing gloss as its reason for reaching ahead."""
+    assert lexicon.basis_qualifier_policy["window"]["sentences_after"] >= 1
+    assert analyse(
+        "Enter on a large wick. By large I mean twice the ATR.", lexicon
+    ).rebased_findings
+
+
+def test_the_shipped_window_is_also_bounded_from_above(tmp_path, lexicon):
+    """The window is a real bound in BOTH directions, not just a floor.
+
+    A distant gloss is out of reach at the shipped setting and in reach at a
+    wider one. That matters twice over: it pins the declared number from above
+    as well as below, so widening it is a visible change rather than a silent
+    one; and the miss it demonstrates is a REAL limit, which is why
+    basis_qualifier_policy['limits'] now names "a gloss further away than
+    window.sentences_after" outright instead of implying the guard sees
+    everything.
+    """
+    distant = (
+        "Enter on a large wick. I wait for bar close. I never trade the open. "
+        "By large I mean twice the ATR."
+    )
+    assert not analyse(distant, lexicon).rebased_findings
+    assert analyse(distant, _lexicon_with_sentences_after(tmp_path, 3)).rebased_findings
+    assert "further away than" in lexicon.basis_qualifier_policy["limits"]
 
 
 def test_the_rebasing_vocabulary_is_declared_data_not_code(lexicon):

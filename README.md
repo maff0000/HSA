@@ -67,9 +67,9 @@ incomplete boot.
 | [`docs/VERSIONING.md`](docs/VERSIONING.md) | Immutability, lifecycle and `derive_candidate` — how a change becomes a separately versioned candidate (`PID.md:185-189`). |
 | [`contracts/`](contracts/) | The frozen JSON Schema contract set, plus [`contracts/README.md`](contracts/README.md). |
 | [`catalogue/atomic/`](catalogue/atomic/) | The catalogue of atomic strategies. |
-| [`hsa/`](hsa/) | The CLI: `hsa boot`, `hsa validate`. |
+| [`hsa/`](hsa/) | The CLI: `hsa boot`, `hsa validate`, `hsa intake`, `hsa chain`, `hsa cer`. `intake` and `chain` carry acceptance criteria 2-3 and 5 directly. |
 | [`tests/`](tests/) | Test suite and reusable fixture documents. |
-| `strategies/` | Governed strategy packages and version state, once any exist. |
+| [`strategies/`](strategies/) | Governed strategy packages and version state: `gold_context_breakout/1.0.0` (acceptance Example A) and `wick_rejection_sequence/0.1.0` (Example B), plus [`strategies/README.md`](strategies/README.md). |
 
 ## Doctrine in one page
 

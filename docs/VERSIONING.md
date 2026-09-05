@@ -106,10 +106,59 @@ The candidate:
 Those are derived, and setting them by hand is how an in-place edit disguises
 itself as a candidate.
 
-`derive_candidate` refuses a parent that was never promoted. A candidate that
-has not been through the gates is not frozen, so it is edited directly rather
-than superseded — and the frozen schema describes `supersedes` as *the
-promoted version this candidate proposes to replace*.
+`derive_candidate` refuses a parent that was never promoted. A version that
+has not been through the gates is not something to supersede — the frozen
+schema describes `supersedes` as *the promoted version this candidate
+proposes to replace* — and a candidate that is not yet frozen is edited
+directly instead.
+
+**"Never promoted" is a fact about a version's history, not about its current
+status**, and reading it off the status is how this guard was once bypassed.
+`CANDIDATE -> RETIRED` is a legitimate, gate-free transition: a rejected
+candidate is retired, not deleted. While `RETIRED` was treated as meaning
+"has been through promotion", a package could be created as a candidate,
+retired without ever facing a gate, and then superseded by a derived `1.1.0`
+that validated cleanly against the frozen schema — the precise thing
+acceptance criterion 13 exists to prevent, reachable through documented
+public API alone.
+
+So promotion is now established from evidence of history, in two steps:
+
+| Parent status | How promotion is established |
+| --- | --- |
+| `PROMOTED`, `DORMANT` | The status proves it. `DORMANT` is reachable **only** from `PROMOTED`, so nothing else needs checking. |
+| `RETIRED` | The status proves **nothing** — it is reachable straight from `CANDIDATE`. A `PROMOTION_EVIDENCE` CER reference **anchored to that exact `strategy_id` and `strategy_version`** is required. |
+| `CANDIDATE` | Never promoted. |
+
+That split is **derived from `ALLOWED_STATUS_TRANSITIONS`**, not written down
+beside it: the code walks the transition graph from `CANDIDATE` without
+entering `PROMOTED` and asks which frozen statuses it can still reach. Add a
+transition one day and the guard tightens by itself rather than silently
+going stale, which is how it went stale the first time.
+
+A `PROMOTION_EVIDENCE` reference is the only durable trace of promotion a
+package can carry: `lifecycle` holds a *current* status and nothing
+historical, and its `additionalProperties: false` forbids adding a
+`promoted_at_utc` of our own. The honest limit is that a hand-written package
+could carry such a reference without any promotion having happened — that is
+**fabricating evidence**, not bypassing a guard, and it is caught one level
+up by the inventory invariant in `tests/test_criterion_13_inventory.py`,
+which additionally requires the evidence to be `CER_LIVE`. What is closed
+here is the bypass that needed no evidence at all.
+
+Two questions that used to share one answer are now separate, and the module
+keeps both:
+
+* **`is_promoted(package)`** — has this version been through promotion?
+  Derived from history. This is what gates `derive_candidate`.
+* **`is_frozen(package)`** — may this version's content still be edited?
+  Derived from status. This is what gates `refuse_in_place_mutation`.
+
+They differ exactly on a retired candidate: nothing may supersede it, because
+nothing promoted it, but its content is still frozen, because a retired record
+is a record. Answering the editing question with the supersession rule would
+have made retired candidates quietly editable — a different defect, not a fix
+for the first one.
 
 The returned document is **not** written anywhere. Validate it with
 `hsa.contracts.validate_document` and commit it; Git is the durable authority
@@ -143,12 +192,31 @@ one.
 `refuse_in_place_mutation(promoted, proposed)` raises
 `PromotedVersionImmutableError` when `proposed` would edit a promoted version
 rather than supersede it. This is real, tested behaviour — see
-`tests/test_versioning.py`. Actual captured output:
+`tests/test_versioning.py`.
+
+The block below is captured output, so the call that produces it is shown in
+full. The parenthesised location comes from the optional `source=` argument;
+a two-argument call omits it, and the earlier version of this section showed
+a two-argument call above output that carried one — a transcript nothing
+could have produced. `tests/test_criterion_13_inventory.py` now regenerates
+this text and asserts the document matches it, so it cannot drift again.
+
+```python
+promoted = apply_status_transition(package, STATUS_PROMOTED)
+proposed = copy.deepcopy(promoted)
+proposed["parameters"][0]["default"] = 999
+proposed["thesis"] = "Reworded thesis."
+refuse_in_place_mutation(
+    promoted,
+    proposed,
+    source="strategies/gold_context_breakout/1.0.0/package.json",
+)
+```
 
 ```
-refusing in-place modification of gold_context_breakout 1.0.0 (strategies/gold_context_breakout/1.0.0.json): that version is PROMOTED and promoted versions are immutable (PID lines 185-187). 2 changes refused:
-  $.parameters[0].default: 1 -> 999
-  $.thesis: 'Breakouts taken in the direction of an established higher-timeframe trend re... -> 'Reworded thesis.'
+refusing in-place modification of gold_context_breakout 1.0.0 (strategies/gold_context_breakout/1.0.0/package.json): that version is PROMOTED and promoted versions are immutable (PID lines 185-187). 2 changes refused:
+  $.parameters[0].default: 30 -> 999
+  $.thesis: 'On XAUUSD the 4H relationship between a 50-period and a 200-period moving av... -> 'Reworded thesis.'
 a modification must be a separately versioned candidate that passes the governed evidence gates again (PID line 189, acceptance criterion 13 at PID line 262): derive one with hsa.versioning.derive_candidate().
 ```
 
@@ -159,7 +227,7 @@ and what to do instead.
 It returns cleanly — no refusal — when:
 
 * the versions differ (that is the correct path, not a mutation);
-* the shared version has never been promoted (a candidate is still mutable);
+* the shared version is not frozen (a candidate is still mutable);
 * the only difference is a permitted status transition.
 
 It raises `VersioningError` if asked to compare two *different* strategies,
@@ -307,7 +375,8 @@ from hsa.versioning import (
     describe_in_place_mutation,  # the same check, without raising
     apply_status_transition,     # dormancy and reactivation
     lineage,                     # order a strategy's versions
-    status_of, is_promoted, identity_of, supersedes_of,
+    status_of, is_frozen, is_promoted, promotion_evidence_of,
+    identity_of, supersedes_of,
     parse_version, bump_version,
 )
 ```

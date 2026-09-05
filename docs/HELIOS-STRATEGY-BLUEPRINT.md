@@ -147,7 +147,7 @@ Practical consequences:
 The template is a hypothesis structure to be empirically validated, not
 doctrine that guarantees edge (`PID.md:97`). HSA may not present a strategy
 as sound merely because it fills all four roles. Evidence decides that, via
-CER (§6.3), and dormancy is an acceptable outcome (§7.2).
+CER (§4.4), and dormancy is an acceptable outcome (§6).
 
 ---
 

@@ -9,10 +9,38 @@ PARAMETERISE term is only ruled for the claim the lexicon declares: "large
 wick" is ratified onto a single-bar wick-over-range basis, and "large wick
 relative to the recent average" is a different claim that ruling does not
 cover. So before a PARAMETERISE term is allowed to resolve, the declared
-window around it is scanned against the declared basis-qualifier vocabulary,
-and a term whose context re-bases it becomes an unresolved item instead of a
-resolution. Its limits are declared alongside it in the lexicon and are real:
-it recognises listed constructions inside a declared window, nothing more.
+window around it is scanned against the declared basis-qualifier vocabulary.
+
+FINDING A QUALIFIER IS NOT ENOUGH TO REFUSE. The window says where to look;
+what decides the outcome is ATTACHMENT — whether the qualifier modifies the
+ruled measurement, or merely shares a sentence with it. Three declared forms
+attach (``basis_qualifier_policy.attachment`` in the lexicon):
+
+    SLOT        the qualifier sits in the term's own modifier slot, the
+                ``basis_slot`` group its pattern declares — "a large ATR
+                wick", "a larger than average wick". The slot is a wildcard
+                INSIDE the matched span, which is exactly where a re-basing
+                lands, so hits inside the match are inspected, never dropped.
+    COMPLEMENT  a COMPARATIVE qualifier stands as the term's own complement,
+                separated from it only by declared filler — "a large wick
+                RELATIVE TO the recent average". Comparatives are the
+                connectives that bind a yardstick to a measurement; a bare
+                yardstick noun attaches to whatever else the clause is about.
+    GLOSS       the source restates the term's own ruled word and defines it
+                — "a large wick, and by large I mean twice the 14-period
+                ATR". The gloss must NAME a word the match consumed.
+
+Everything else co-occurs and is left alone, deliberately. An ATR stop, a
+bar-count expiry (which PID line 136 requires a package to state), a
+moving-average trend filter and a prior-bar price reference are ordinary,
+correct trading prose; refusing them would be a defect of its own, not
+caution. This is PRECISION chosen over RECALL, and what makes that safe is
+that the guard is not the only thing telling the truth: every resolution it
+permits still carries ``source_basis_agreement: NOT_VERIFIED``, and now also
+names the declared qualifiers that were seen and deliberately left
+unattached. Its limits are declared alongside it in the lexicon and are
+real: it recognises listed constructions, attached in listed ways, inside a
+declared window, and nothing more.
 
 WHAT THIS IS NOT: an LLM call, or anything that understands English. It
 cannot prove a description is unambiguous — absence of declared markers is
@@ -33,7 +61,14 @@ import re
 from dataclasses import dataclass
 from typing import Sequence
 
-from hsa.intake.lexicon import PARAMETERISE, BasisQualifier, Lexicon, Marker, Term
+from hsa.intake.lexicon import (
+    BASIS_SLOT_GROUP,
+    PARAMETERISE,
+    BasisQualifier,
+    Lexicon,
+    Marker,
+    Term,
+)
 
 __all__ = [
     "Occurrence",
@@ -105,6 +140,11 @@ class TermFinding:
     #: same order. Empty for a REFUSE term, which is not scanned: it refuses
     #: already, and there is no ruled basis for context to displace.
     scanned_windows: tuple[Occurrence, ...] = ()
+    #: Declared qualifiers found inside those windows that attached to
+    #: nothing, and so did not re-base the term. This is the honest half of a
+    #: precision-first guard: the resolution reports what it saw and passed
+    #: over, so a reviewer can judge the call instead of taking it on trust.
+    unattached: tuple[QualifierHit, ...] = ()
 
     @property
     def location(self) -> str:
@@ -120,17 +160,30 @@ class TermFinding:
         return " / ".join(seen)
 
 
+#: Recorded on a hit the guard saw but did not treat as re-basing. Emitted
+#: rather than discarded: a resolution that says which declared qualifiers it
+#: chose to ignore is reviewable, and one that silently drops them is not.
+NOT_ATTACHED = "NOT_ATTACHED"
+
+
 @dataclass(frozen=True)
 class QualifierHit:
-    """One declared re-basing construction, found in a term's window."""
+    """One declared re-basing construction, found in a term's window.
+
+    ``attachment`` is the declared form by which it attaches to the ruled
+    measurement (SLOT, COMPLEMENT or GLOSS), or ``NOT_ATTACHED`` when it was
+    found and deliberately not treated as re-basing.
+    """
 
     qualifier: BasisQualifier
     occurrence: Occurrence
+    attachment: str
 
     def describe(self) -> str:
-        return "%s (%s) at %s: %r" % (
+        return "%s (%s) attached as %s at %s: %r" % (
             self.qualifier.qualifier_id,
             self.qualifier.reason,
+            self.attachment,
             self.occurrence.describe(),
             self.occurrence.text,
         )
@@ -355,28 +408,69 @@ def _window_span(
     return bounds[first][0], bounds[last][1]
 
 
-def _qualifier_hits(
+def _sentence_end(bounds: Sequence[tuple[int, int]], offset: int) -> int:
+    """End of the sentence ``offset`` falls in."""
+    return bounds[_sentence_index(bounds, offset)][1]
+
+
+def _slot_span(match: "re.Match[str]", start: int) -> tuple[int, int]:
+    """The term match's declared modifier slot, as an absolute span.
+
+    Empty when the pattern's slot consumed no words, and empty when the
+    branch that matched declares no slot at all (a pattern may declare the
+    group on one alternative only). An empty slot attaches nothing, which is
+    correct: there are no modifiers to attach.
+    """
+    try:
+        slot_start, slot_end = match.span(BASIS_SLOT_GROUP)
+    except (IndexError, re.error):
+        return (start, start)
+    if slot_start < 0:
+        return (start, start)
+    return (slot_start, slot_end)
+
+
+def _anchor_words(norm: str, start: int, end: int, slot: tuple[int, int]) -> tuple[str, ...]:
+    """The ruled words this match actually consumed, slot contents excluded.
+
+    These are what a GLOSS has to name in order to be attached to this term:
+    "by LARGE I mean twice the ATR" is a re-basing of "a large wick"; the same
+    sentence without "large" in it defines something else.
+    """
+    slot_start, slot_end = slot
+    if start < slot_start and slot_end <= end:
+        text = norm[start:slot_start] + " " + norm[slot_end:end]
+    else:
+        text = norm[start:end]
+    words: list[str] = []
+    for word in re.split(r"[^a-z0-9.%]+", text):
+        if word and word not in words:
+            words.append(word)
+    return tuple(words)
+
+
+def _declared_hits(
     norm: str,
     qualifiers: Sequence[BasisQualifier],
     window: tuple[int, int],
-    term_span: tuple[int, int],
 ) -> list[tuple[int, int, BasisQualifier]]:
-    """Declared re-basing constructions inside ``window``, excluding the term.
+    """Every declared qualifier construction inside ``window``.
 
-    A hit wholly inside the term's own matched span is part of the ruled
-    phrase the lexicon already declares, not context that re-bases it, so it
-    is dropped. Order is fixed: leftmost, then longest, then the order the
-    lexicon declares them in.
+    Hits INSIDE the term's own matched span are kept, not dropped. They used
+    to be dropped as "part of the ruled phrase the lexicon already declares",
+    which is false: a PARAMETERISE pattern tolerates a wildcard run of words
+    between its ruled adjective and its ruled head noun, and that wildcard is
+    precisely where a re-basing lands ("a large ATR wick"). Whether a hit
+    counts is decided by ``_attachment``, not by where the match happens to
+    fall. Order is fixed: leftmost, then longest, then qualifier_id.
     """
     found: list[tuple[int, int, BasisQualifier]] = []
     seen: set[tuple[int, int, str]] = set()
     window_start, window_end = window
-    for order, qualifier in enumerate(qualifiers):
+    for qualifier in qualifiers:
         for match in qualifier.pattern.finditer(norm, window_start, window_end):
             start, end = match.start(), match.end()
             if end <= start:
-                continue
-            if term_span[0] <= start and end <= term_span[1]:
                 continue
             key = (start, end, qualifier.qualifier_id)
             if key in seen:
@@ -387,6 +481,121 @@ def _qualifier_hits(
     return found
 
 
+def _attachment(
+    norm: str,
+    lexicon: Lexicon,
+    bounds: Sequence[tuple[int, int]],
+    window: tuple[int, int],
+    term_span: tuple[int, int],
+    slot_span: tuple[int, int],
+    anchors: Sequence[str],
+) -> tuple[
+    list[tuple[int, int, BasisQualifier, str]],
+    list[tuple[int, int, BasisQualifier]],
+]:
+    """Split the declared hits in ``window`` into attached and unattached.
+
+    A qualifier re-bases the ruled term only when the lexicon's declared
+    attachment ruling says it is bound to the measurement. Co-occurrence in
+    the same sentence is not attachment: "a large wick. My stop is 2 ATR
+    below entry" names ATR as the size of a STOP, and refusing that would
+    refuse a correct strategy description. See the module docstring and
+    ``basis_qualifier_policy.attachment``.
+
+    Returns ``(attached, unattached)``; the term refuses if ``attached`` is
+    non-empty, and reports ``unattached`` either way.
+    """
+    attachment = lexicon.attachment
+    window_start, window_end = window
+    term_start, term_end = term_span
+    slot_start, slot_end = slot_span
+
+    found = _declared_hits(norm, lexicon.basis_qualifiers, window)
+    forms: dict[tuple[int, int, str], str] = {}
+
+    # Form SLOT — inside the term's own modifier slot. Any category attaches:
+    # a word sitting between "large" and "wick" modifies the measurement, and
+    # there is nothing else in the slot for it to modify.
+    if slot_end > slot_start:
+        for start, end, qualifier in found:
+            if start < slot_end and slot_start < end:
+                forms[(start, end, qualifier.qualifier_id)] = "SLOT"
+
+    # Form COMPLEMENT — a COMPARATIVE standing as the term's own complement.
+    # ``zones`` collects the spans whose contents name the displacing basis,
+    # so the refusal can quote the whole construction and not just its hinge.
+    zones: list[tuple[int, int, str]] = []
+    for start, end, qualifier in found:
+        if qualifier.category not in attachment.complement_categories:
+            continue
+        if start < term_end:
+            continue
+        if attachment.complement_filler.fullmatch(norm[term_end:start]) is None:
+            continue
+        forms.setdefault((start, end, qualifier.qualifier_id), "COMPLEMENT")
+        zones.append((start, min(_sentence_end(bounds, start), window_end), "COMPLEMENT"))
+
+    # Form GLOSS — the source restates one of the term's own ruled words and
+    # then defines it. This is the only form that reaches past the term's own
+    # sentence; how far it reaches is window.sentences_after.
+    if anchors:
+        for gloss in attachment.gloss_constructions:
+            for match in gloss.compile_for(anchors).finditer(
+                norm, window_start, window_end
+            ):
+                if match.start() < term_start:
+                    continue
+                zones.append(
+                    (
+                        match.end(),
+                        min(_sentence_end(bounds, match.start()), window_end),
+                        "GLOSS",
+                    )
+                )
+
+    # A qualifier lying inside an attached comparative's complement, or after
+    # an attached gloss, is part of the basis that construction states.
+    for start, end, qualifier in found:
+        key = (start, end, qualifier.qualifier_id)
+        if key in forms:
+            continue
+        for zone_start, zone_end, form in zones:
+            if zone_start <= start < zone_end:
+                forms[key] = form
+                break
+
+    attached = [
+        (start, end, qualifier, forms[(start, end, qualifier.qualifier_id)])
+        for start, end, qualifier in found
+        if (start, end, qualifier.qualifier_id) in forms
+    ]
+    unattached = [
+        (start, end, qualifier)
+        for start, end, qualifier in found
+        if (start, end, qualifier.qualifier_id) not in forms
+    ]
+    return attached, unattached
+
+
+def _dedupe_hits(hits: Sequence[tuple]) -> list[tuple]:
+    """One construction, reported once, in a fixed order.
+
+    A term matching twice inside one window finds the same constructions
+    twice, and two occurrences can contribute them out of document order, so
+    the emitted item would otherwise vary run to run.
+    """
+    seen: set[tuple[int, int, str]] = set()
+    unique: list[tuple] = []
+    for hit in hits:
+        key = (hit[0], hit[1], hit[2].qualifier_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(hit)
+    unique.sort(key=lambda hit: (hit[0], -(hit[1] - hit[0]), hit[2].qualifier_id))
+    return unique
+
+
 def analyse(text: str, lexicon: Lexicon) -> Analysis:
     """Scan ``text`` against ``lexicon`` and return every finding."""
     norm, index_map = normalise(text)
@@ -395,29 +604,31 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     # Pass 1 — ruled lexicon terms. Every match is collected first, then
     # overlaps are resolved by a fixed rule, so a longer ruled phrase always
     # beats a shorter one that starts in the same place.
-    candidates: list[tuple[int, int, int, Term]] = []
+    candidates: list[tuple[int, int, int, Term, "re.Match[str]"]] = []
     for order, term in enumerate(lexicon.terms):
         for match in term.pattern.finditer(norm):
             if match.end() > match.start():
-                candidates.append((match.start(), match.end(), order, term))
+                candidates.append((match.start(), match.end(), order, term, match))
     candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
 
     consumed: list[tuple[int, int]] = []
-    accepted: list[tuple[int, int, Term]] = []
-    for start, end, _order, term in candidates:
+    accepted: list[tuple[int, int, Term, "re.Match[str]"]] = []
+    for start, end, _order, term, match in candidates:
         if any(start < taken_end and taken_start < end for taken_start, taken_end in consumed):
             continue
         consumed.append((start, end))
-        accepted.append((start, end, term))
+        accepted.append((start, end, term, match))
 
     # Pass 1b — the basis-qualifier check. A PARAMETERISE ruling covers the
     # phrase the lexicon declares and nothing else, so before a ruled term is
     # allowed to resolve, the declared window around it is scanned for
-    # declared constructions that name a different measurement basis. This is
-    # surface matching over a declared vocabulary inside a declared window;
-    # what it does not cover is stated in the lexicon's own
-    # basis_qualifier_policy['limits'] and repeated in every emitted
-    # resolution, because a guard that overstates itself is worse than none.
+    # declared constructions that name a different measurement basis — and
+    # each one found is then tested for ATTACHMENT to the ruled measurement.
+    # Finding a qualifier is not enough: the window bounds the search, the
+    # declared attachment forms decide the outcome. What this does not cover
+    # is stated in the lexicon's own basis_qualifier_policy['limits'] and
+    # repeated in every emitted resolution, because a guard that overstates
+    # itself is worse than none.
     window_policy = lexicon.basis_qualifier_policy["window"]
     bounds = _sentence_bounds(norm, str(window_policy["sentence_terminators"]))
     sentences_after = int(window_policy["sentences_after"])
@@ -425,10 +636,11 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     term_occurrences: dict[str, list[Occurrence]] = {}
     term_windows: dict[str, list[Occurrence]] = {}
     term_by_id: dict[str, Term] = {}
-    term_hits: dict[str, list[tuple[int, int, BasisQualifier]]] = {}
+    term_hits: dict[str, list[tuple[int, int, BasisQualifier, str]]] = {}
+    term_unattached: dict[str, list[tuple[int, int, BasisQualifier]]] = {}
     term_context: dict[str, tuple[int, int]] = {}
     term_window_span: dict[str, tuple[int, int]] = {}
-    for start, end, term in sorted(accepted, key=lambda item: item[0]):
+    for start, end, term, match in sorted(accepted, key=lambda item: item[0]):
         window = _window_span(bounds, start, end, sentences_after)
         term_occurrences.setdefault(term.term_id, []).append(
             _occurrence(text, index_map, starts, start, end)
@@ -438,11 +650,22 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         )
         term_by_id[term.term_id] = term
         term_hits.setdefault(term.term_id, [])
+        term_unattached.setdefault(term.term_id, [])
         if term.disposition != PARAMETERISE:
             # A REFUSE term already refuses; there is no ruled basis for
             # context to displace, so scanning it would only add noise.
             continue
-        hits = _qualifier_hits(norm, lexicon.basis_qualifiers, window, (start, end))
+        slot = _slot_span(match, start)
+        hits, unattached = _attachment(
+            norm,
+            lexicon,
+            bounds,
+            window,
+            (start, end),
+            slot,
+            _anchor_words(norm, start, end, slot),
+        )
+        term_unattached[term.term_id].extend(unattached)
         if not hits:
             continue
         if term.term_id not in term_context:
@@ -462,6 +685,16 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             term=term_by_id[term_id],
             occurrences=tuple(occurrences),
             scanned_windows=tuple(term_windows[term_id]),
+            unattached=tuple(
+                QualifierHit(
+                    qualifier=qualifier,
+                    occurrence=_occurrence(text, index_map, starts, hit_start, hit_end),
+                    attachment=NOT_ATTACHED,
+                )
+                for hit_start, hit_end, qualifier in _dedupe_hits(
+                    term_unattached[term_id]
+                )
+            ),
         )
         for term_id, occurrences in term_occurrences.items()
         if not term_hits[term_id]
@@ -472,17 +705,7 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     for term_id, occurrences in term_occurrences.items():
         # A term matching twice inside one window finds the same
         # constructions twice. Report each construction once.
-        hits = []
-        seen_hits: set[tuple[int, int, str]] = set()
-        for hit in term_hits[term_id]:
-            key = (hit[0], hit[1], hit[2].qualifier_id)
-            if key in seen_hits:
-                continue
-            seen_hits.add(key)
-            hits.append(hit)
-        # Two occurrences of one term can contribute hits out of document
-        # order; sort so the emitted item is byte-identical run to run.
-        hits.sort(key=lambda hit: (hit[0], -(hit[1] - hit[0]), hit[2].qualifier_id))
+        hits = _dedupe_hits(term_hits[term_id])
         if not hits:
             continue
         context_start, context_end = term_context[term_id]
@@ -507,8 +730,9 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
                         occurrence=_occurrence(
                             text, index_map, starts, hit_start, hit_end
                         ),
+                        attachment=form,
                     )
-                    for hit_start, hit_end, qualifier in hits
+                    for hit_start, hit_end, qualifier, form in hits
                 ),
                 context=_occurrence(
                     text, index_map, starts, context_start, context_end
