@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ from hsa.intake import (
     read_request,
     utc_now,
 )
+from hsa.intake.documents import NOT_YET_SPECIFIED
 from hsa.intake.errors import IntakeError, IntakeRequestError
 from hsa.intake.request import derive_intake_id
 
@@ -412,3 +414,72 @@ def test_every_intake_error_is_an_hsa_error():
     """So hsa/cli.py maps them without any change to its exit-code table."""
     assert issubclass(IntakeError, HSAError)
     assert issubclass(IntakeRequestError, HSAError)
+
+
+# --- a citation is a claim, and a wrong one ships in product output -----------
+
+#: What each ``not_yet_specified`` field IS, stated here independently of the
+#: code, in the PID's own words. The code says which PID line it cites; PID.md
+#: decides whether that line says this. Six of these citations were off by one
+#: — ``chain`` cited 134 (semantic timeframe roles) for the chain definition on
+#: 135, and the shift ran through direction, timing, persistence, expiry and
+#: state semantics — and every draft HSA emitted carried them, so a reader
+#: following the reference landed on the wrong obligation.
+NOT_YET_SPECIFIED_MEANS = {
+    "atomic_strategies": "atomic strategy definitions",
+    "chain": "chain definition",
+    # This one cites the section that DEFINES the roles (PID lines 84-97),
+    # not the bullet that lists the field, because the obligation names the
+    # four roles themselves. Both readings are honest; the citation has to
+    # match the one the obligation actually makes.
+    "timeframe_roles": "semantic roles",
+    "direction_semantics": "direction semantics",
+    "timing": "timing/persistence/expiry",
+    "persistence": "timing/persistence/expiry",
+    "expiry": "timing/persistence/expiry",
+    "state_semantics": "state semantics",
+    "invalidation_conditions": "invalidation/validity conditions",
+    "validity_conditions": "invalidation/validity conditions",
+    "output_contract": "expected output contract",
+    "deterministic_test_cases": "deterministic test cases",
+    "evidence_requirements": "backtest/evidence requirements",
+    "acceptance_criteria": "acceptance/rejection criteria",
+    "rejection_criteria": "acceptance/rejection criteria",
+    "cer_references": "CER identity/evidence references",
+}
+
+
+def _pid_lines():
+    root = Path(__file__).resolve().parent.parent
+    return (root / "PID.md").read_text(encoding="utf-8").splitlines()
+
+
+def _cited_span(text: str) -> tuple[int, int]:
+    """The one PID line span a description cites, as (first, last), 1-based."""
+    found = re.findall(r"PID lines? (\d+)(?:\s*-\s*(\d+))?", text)
+    assert len(found) == 1, "expected exactly one PID citation in %r" % text
+    first, last = found[0]
+    return int(first), int(last or first)
+
+
+def test_every_pid_citation_a_draft_emits_points_at_what_it_claims():
+    """The cited line must actually say the thing the obligation names.
+
+    This ships to a reader: ``not_yet_specified`` is in every draft, and its
+    whole purpose is to make an unsupplied section read as an obligation with a
+    reference. A reference that lands on the wrong bullet is worse than none,
+    because it reads as precision.
+    """
+    lines = _pid_lines()
+    assert set(NOT_YET_SPECIFIED_MEANS) == {
+        field for field, _obligation in NOT_YET_SPECIFIED
+    }, "this table and the emitted list have diverged"
+
+    for field, obligation in NOT_YET_SPECIFIED:
+        first, last = _cited_span(obligation)
+        expected = NOT_YET_SPECIFIED_MEANS[field]
+        cited = " ".join(lines[first - 1 : last])
+        assert expected.lower() in cited.lower(), (
+            "%s cites PID line(s) %d-%d, which say %r, not %r"
+            % (field, first, last, cited.strip(), expected)
+        )

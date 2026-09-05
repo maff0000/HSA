@@ -37,6 +37,7 @@ __all__ = [
     "REFUSE",
     "BASIS_SLOT_GROUP",
     "ANCHOR_PLACEHOLDER",
+    "WILDCARD_CLASS",
     "Term",
     "Marker",
     "BasisQualifier",
@@ -102,6 +103,20 @@ _ATTACHMENT_FORMS = ("SLOT", "COMPLEMENT", "GLOSS")
 #: so the guard has to know where it is. Requiring the group by name is why a
 #: term cannot be added whose slot the guard would silently fail to inspect.
 BASIS_SLOT_GROUP = "basis_slot"
+
+#: A character class that can match a letter is a WILDCARD: it matches words
+#: the lexicon never enumerated. Every one of those in a term pattern must sit
+#: inside the declared ``basis_slot`` group, and ``_check_wildcard_slots``
+#: refuses to load a lexicon where one does not.
+#:
+#: This is the structural half of the slot-suppression fix. The analyser can
+#: only decline to treat wildcard text as ruled if it can SEE where the
+#: wildcard is, and the only thing that tells it is the named group. A term
+#: added later with an undeclared wildcard would silently reacquire the old
+#: behaviour — its slot would swallow a REFUSE term or a marker and the scan
+#: would never look inside — so the loader makes that lexicon unloadable
+#: instead of letting it ship.
+WILDCARD_CLASS = re.compile(r"\[(?:[^\]\\]|\\.)*\]")
 
 #: Placeholder in a declared gloss pattern, replaced per match by the words
 #: the ruled term actually consumed. Substituted with str.replace, never
@@ -235,8 +250,24 @@ class Lexicon:
     markers: tuple[Marker, ...]
     basis_qualifiers: tuple[BasisQualifier, ...]
     unknown_term_policy: Mapping[str, Any]
+    term_match_policy: Mapping[str, Any]
     basis_qualifier_policy: Mapping[str, Any]
     attachment: Attachment
+
+    @property
+    def unruled_slot_policy(self) -> Mapping[str, Any]:
+        """The ruling applied when a term's wildcard slot holds unruled text."""
+        return self.term_match_policy["unruled_slot_content"]
+
+    @property
+    def sentence_terminators(self) -> str:
+        """Terminators a term match may not cross. One declaration, one place.
+
+        ``term_match_policy`` and ``basis_qualifier_policy.window`` are checked
+        at load time to declare the same set, because a match boundary and a
+        window boundary that disagreed would cut the same text two ways.
+        """
+        return str(self.term_match_policy["sentence_boundary"]["sentence_terminators"])
 
     def term(self, term_id: str) -> Term:
         for candidate in self.terms:
@@ -277,6 +308,119 @@ def _compile(raw: str, where: str) -> "re.Pattern[str]":
         return re.compile(raw)
     except re.error as exc:
         raise LexiconError("%s has an invalid pattern: %s" % (where, exc)) from exc
+
+
+def _slot_group_span(pattern: str) -> tuple[int, int] | None:
+    """Where the declared ``basis_slot`` group sits in the pattern SOURCE.
+
+    Returns the offsets of the group's opening and closing parentheses, or
+    ``None`` when the pattern declares no slot. Parentheses are counted with
+    escapes and character classes honoured, because ``[)]`` and ``\\)`` are
+    literal brackets and closing on one of them would report the wrong span.
+    """
+    opener = "(?P<%s>" % BASIS_SLOT_GROUP
+    start = pattern.find(opener)
+    if start < 0:
+        return None
+    depth = 0
+    in_class = False
+    index = start
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return (start, index + 1)
+        index += 1
+    return (start, len(pattern))
+
+
+def _wildcards_outside_slot(pattern: str) -> list[str]:
+    """Every construct in ``pattern`` that can match an unenumerated word.
+
+    A ruled term is a phrase the lexicon names. Wherever a pattern stops
+    naming words and starts accepting whatever is there, that run is a
+    WILDCARD and the text it consumes is not ruled. This finds those runs and
+    reports the ones that fall outside the declared ``basis_slot`` group.
+    """
+    slot = _slot_group_span(pattern)
+    slot_start, slot_end = slot if slot else (-1, -1)
+    found: list[str] = []
+    index = 0
+    length = len(pattern)
+    while index < length:
+        char = pattern[index]
+        if char == "\\":
+            escape = pattern[index : index + 2]
+            if escape[-1:] in ("w", "W", "s", "S", "D"):
+                if not (slot_start <= index < slot_end):
+                    found.append(escape)
+            index += 2
+            continue
+        if char == "[":
+            close = index + 1
+            if pattern[close : close + 1] == "^":
+                close += 1
+            if pattern[close : close + 1] == "]":
+                close += 1
+            while close < length and pattern[close] != "]":
+                close += 2 if pattern[close] == "\\" else 1
+            body = pattern[index + 1 : close]
+            letters = body.startswith("^") or any(
+                token in body for token in ("a-z", "A-Z", "\\w", "\\S", "\\D")
+            )
+            if letters and not (slot_start <= index < slot_end):
+                found.append(pattern[index : close + 1])
+            index = close + 1
+            continue
+        if char == ".":
+            if not (slot_start <= index < slot_end):
+                found.append(".")
+        index += 1
+    return found
+
+
+def _check_wildcard_slots(pattern: str, where: str) -> None:
+    """Refuse a term pattern whose wildcards are not declared as the slot.
+
+    The analyser treats a term match as ruled text and stops scanning inside
+    it — that is how a phrase the lexicon rules on avoids being reported twice
+    — with ONE exception: the declared ``basis_slot``, which is wildcard text
+    that merely sits between the ruled words and is scanned like any other
+    prose. That exception can only be applied where the analyser knows the
+    wildcard is, and the named group is the only thing that tells it.
+
+    So an undeclared wildcard is not a style problem. It is the original
+    defect, re-armed: a slot that swallowed "near resistance" — one of PID
+    line 115's must-not-guess phrases — and hid it behind a resolution,
+    silently, at exit 0. Rather than trusting a future author to remember,
+    the lexicon simply does not load.
+    """
+    stray = _wildcards_outside_slot(pattern)
+    if not stray:
+        return
+    raise LexiconError(
+        "%s: the pattern contains wildcard construct(s) %s outside the "
+        "declared (?P<%s>...) group. A wildcard matches words the lexicon "
+        "never ruled on, and the analyser must be able to see where it is: "
+        "text a term consumed is not scanned again, so an undeclared wildcard "
+        "silently swallows whatever falls into it — including a REFUSE term "
+        "or a discretionary marker. Wrap the wildcard run in (?P<%s>...), or "
+        "enumerate the words the pattern is willing to accept "
+        "(docs/AMBIGUITY-POLICY.md, 'A wildcard slot is not ruled text')."
+        % (where, ", ".join(repr(item) for item in stray), BASIS_SLOT_GROUP,
+           BASIS_SLOT_GROUP)
+    )
 
 
 def _check_enum(value: Any, allowed: Sequence[str], where: str, key: str) -> str:
@@ -440,6 +584,7 @@ def _load_term(raw: Any, index: int, path: Path) -> Term:
         _require(raw, "disposition", where), _DISPOSITIONS, where, "disposition"
     )
     pattern_text = _require_text(raw, "pattern", where)
+    _check_wildcard_slots(pattern_text, where)
 
     parameters: tuple[Mapping[str, Any], ...] = ()
     hermes: tuple[Mapping[str, Any], ...] = ()
@@ -610,6 +755,76 @@ def _load_unknown_policy(raw: Any, path: Path) -> Mapping[str, Any]:
             "closed; any other value would make intake fail open (PID line 39)"
             % where
         )
+    return raw
+
+
+def _load_term_match_policy(
+    raw: Any, raw_qualifier_policy: Any, path: Path
+) -> Mapping[str, Any]:
+    """Check the ruling on how much of a term match counts as RULED text.
+
+    Two declarations live here and both change what the analyser refuses, so
+    both are data rather than constants in code:
+
+    * ``sentence_boundary`` — a term match may not span a sentence boundary.
+      Its terminator set must be the same one ``basis_qualifier_policy.window``
+      cuts sentences with; two different sets would mean a match boundary and
+      a window boundary disagreeing about where a sentence ends, which is a
+      contradiction a reviewer would have to find by reading code.
+    * ``unruled_slot_content`` — what happens when a PARAMETERISE term's
+      wildcard slot holds a REFUSE term or an unruled marker. It refuses, for
+      the same reason ``unknown_term_policy`` does: undefined language about
+      the measurement is undefined language, and it fails closed.
+    """
+    where = "%s: term_match_policy" % path
+    _require_text(raw, "description", where)
+
+    sub = "%s sentence_boundary" % where
+    boundary = _require(raw, "sentence_boundary", where)
+    _check_enum(_require(boundary, "rule", sub), _WINDOW_UNITS, sub, "rule")
+    terminators = _require_text(boundary, "sentence_terminators", sub)
+    _require_text(boundary, "decimal_exception", sub)
+    _require_text(boundary, "why", sub)
+    window = _require(raw_qualifier_policy, "window", where)
+    declared = window.get("sentence_terminators") if isinstance(window, Mapping) else None
+    if declared != terminators:
+        raise LexiconError(
+            "%s: sentence_terminators is %r but basis_qualifier_policy.window "
+            "declares %r. One text, one set of sentence boundaries: a match "
+            "that may not cross a boundary and a window bounded by one must "
+            "agree on where the boundaries are" % (sub, terminators, declared)
+        )
+
+    sub = "%s slot_is_not_ruled_text" % where
+    slot_rule = _require(raw, "slot_is_not_ruled_text", where)
+    _require_text(slot_rule, "rule", sub)
+    _require_text(slot_rule, "why", sub)
+
+    sub = "%s unruled_slot_content" % where
+    unruled = _require(raw, "unruled_slot_content", where)
+    if unruled.get("disposition") != REFUSE:
+        raise LexiconError(
+            "%s: disposition must be REFUSE. A wildcard slot holding a REFUSE "
+            "term or an unruled marker is undefined language about the "
+            "measurement itself; resolving the term over the top of it would "
+            "declare a parameter for a quantity the source has not finished "
+            "describing, which is the silent guess PID line 39 forbids" % sub
+        )
+    _check_enum(_require(unruled, "severity", sub), _SEVERITIES, sub, "severity")
+    raw_blocks = _require(unruled, "blocks", sub)
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise LexiconError("%s: blocks must be a non-empty list" % sub)
+    for block in raw_blocks:
+        _check_enum(block, _BLOCKS, sub, "blocks entry")
+    _require_text(unruled, "precedence", sub)
+    _require_text(unruled, "why_unresolved_template", sub)
+    resolution = _require(unruled, "resolution_needed", sub)
+    deeper = "%s resolution_needed" % sub
+    _check_enum(_require(resolution, "kind", deeper), _RESOLUTION_KINDS, deeper, "kind")
+    _check_enum(
+        _require(resolution, "responsible", deeper), _RESPONSIBLE, deeper, "responsible"
+    )
+    _require_text(resolution, "description_template", deeper)
     return raw
 
 
@@ -870,6 +1085,11 @@ def load_lexicon(path: str | os.PathLike | None = None) -> Lexicon:
         ),
         unknown_term_policy=_load_unknown_policy(
             _require(raw, "unknown_term_policy", str(target)), target
+        ),
+        term_match_policy=_load_term_match_policy(
+            _require(raw, "term_match_policy", str(target)),
+            _require(raw, "basis_qualifier_policy", str(target)),
+            target,
         ),
         basis_qualifier_policy=_load_basis_qualifier_policy(
             _require(raw, "basis_qualifier_policy", str(target)), target

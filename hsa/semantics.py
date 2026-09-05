@@ -101,7 +101,7 @@ CATALOGUE_DEPENDENT_CHECKS: tuple[str, ...] = ("chain.reference_resolves",)
 CONTEXT_TRIGGER_ROLES: tuple[str, ...] = ("CONTEXT", "TRIGGER")
 
 #: Sections a strategy package states authoritatively and its embedded chain
-#: restates operationally. PID lines 135-137 govern these at package level; the
+#: restates operationally. PID lines 134, 136-138 govern these at package level;
 #: chain must not contradict them. Flagged by W1 as unenforceable in schema.
 AGREEMENT_SECTIONS: tuple[str, ...] = (
     "direction_semantics",
@@ -780,7 +780,7 @@ def _check_package_chain_agreement(package: Mapping, prefix: str) -> list[Findin
 
     W1 recorded this as a real unenforced gap. A strategy package states
     direction, timing, persistence, expiry, state and the role model at
-    package level (PID lines 135-137) and the embedded chain restates them
+    package level (PID lines 134, 136-138) and the embedded chain restates them
     operationally. The package level is authoritative; disagreement means
     FORGE has been handed two specifications and no way to choose.
     """
@@ -828,7 +828,7 @@ def _check_package_chain_agreement(package: Mapping, prefix: str) -> list[Findin
                         _join(prefix, "chain", section, key),
                         "embedded chain declares %s.%s as %s but the package "
                         "declares %s; the two must agree and the package level "
-                        "is authoritative (PID lines 135-137)"
+                        "is authoritative (PID lines 134, 136-138)"
                         % (
                             section,
                             key,

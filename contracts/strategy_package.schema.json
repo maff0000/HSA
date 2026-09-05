@@ -13,7 +13,7 @@
     "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
     "thesis": {
       "$ref": "common.defs.json#/$defs/non_empty_string",
-      "description": "Economic / trading thesis (PID line 130)."
+      "description": "Economic / trading thesis (PID line 129)."
     },
     "instruments": {
       "type": "array",
@@ -49,12 +49,12 @@
     },
     "chain": {
       "$ref": "chain.schema.json",
-      "description": "The full chain definition, embedded (PID line 134)."
+      "description": "The full chain definition, embedded (PID line 135)."
     },
     "direction_semantics": {"$ref": "common.defs.json#/$defs/direction_semantics"},
     "timing": {
       "type": "object",
-      "description": "Governed timing statement (PID line 136).",
+      "description": "Governed timing statement (PID line 137).",
       "properties": {
         "evaluation_trigger": {"enum": ["BAR_CLOSE", "TICK", "ON_INPUT_CHANGE"]},
         "evaluation_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
@@ -73,7 +73,7 @@
     },
     "persistence": {
       "type": "object",
-      "description": "Governed persistence statement (PID line 136).",
+      "description": "Governed persistence statement (PID line 137).",
       "properties": {
         "signal_persists": {"type": "boolean"},
         "persist_for_bars": {"type": "integer", "minimum": 0},
@@ -85,7 +85,7 @@
     },
     "expiry": {
       "type": "object",
-      "description": "Governed expiry statement (PID line 136).",
+      "description": "Governed expiry statement (PID line 137).",
       "properties": {
         "expires": {"type": "boolean"},
         "expires_after_bars": {"type": "integer", "minimum": 1},
@@ -104,7 +104,7 @@
     },
     "state_semantics": {
       "type": "object",
-      "description": "Governed state statement (PID line 137).",
+      "description": "Governed state statement (PID line 138).",
       "properties": {
         "stateful": {"type": "boolean"},
         "states": {

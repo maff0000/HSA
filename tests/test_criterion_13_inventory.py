@@ -120,7 +120,7 @@ def _proposed_changes(package: dict) -> dict:
 
     ``context_window_bars`` governs ``expiry.expires_after_bars``, the prose
     in ``expiry.expiry_rule``, and the same expiry block on the EMBEDDED
-    chain, which the package must agree with (PID lines 135-137). Four
+    chain, which the package must agree with (PID lines 134, 136-138). Four
     coupled locations move together; a candidate that changed one of them
     would be internally inconsistent, and ``hsa.semantics.check_package``
     says so. That coupling is the practical reason a revision is a new

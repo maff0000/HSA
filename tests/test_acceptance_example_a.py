@@ -547,7 +547,7 @@ def test_criterion_7_state_semantics_are_defined(package):
 
 
 def test_criterion_7_the_package_and_its_chain_state_the_same_semantics(package, chain):
-    """PID lines 135-137: the package is authoritative and the chain restates
+    """PID lines 134, 136-138: the package is authoritative and the chain restates
     it operationally. Disagreement hands FORGE two specifications and no way
     to choose."""
     for section in (

@@ -382,7 +382,7 @@ def _refuses(text: str, lex) -> bool:
 #: Ordinary trading prose that must RESOLVE. Every one of these was refused by
 #: the recall-maximising guard, and the refusal advised "restate the source
 #: without the re-basing language" — which for an expiry means deleting the
-#: expiry PID line 136 requires.
+#: expiry PID line 137 requires.
 LEGITIMATE_SOURCES = [
     ("expiry_within_bars", "Enter on a large wick. The setup expires within 3 bars."),
     ("atr_sized_stop", "Enter on a large wick. My stop is 2 ATR below entry."),
@@ -396,6 +396,7 @@ LEGITIMATE_SOURCES = [
     ),
     ("expiry_spelled_out", "Enter on a large wick. Setup expires after four 15m bars."),
     ("expiry_in_digits", "Enter on a large wick. Setup expires after 4 bars."),
+    ("volume_filter", "Enter on a large wick on above average volume."),
 ]
 
 
@@ -844,3 +845,331 @@ def test_the_scan_is_deterministic(lexicon):
     doc_a = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
     doc_b = intake(request, lexicon=lexicon, generated_at_utc=STAMP).document
     assert json.dumps(doc_a, sort_keys=True) == json.dumps(doc_b, sort_keys=True)
+
+
+# --- a wildcard slot is not ruled text ----------------------------------------
+#
+# A term pattern is part literal and part wildcard. The literal parts are the
+# phrase the lexicon rules on; the ``basis_slot`` group is a run of words that
+# merely sits between them and that nobody has ruled on. The analyser used to
+# treat the whole matched span as ruled and stop scanning inside it, and the
+# consequence was the one failure mode this file exists to prevent: a silent
+# one. "near resistance" — PID line 115, must never be guessed — disappeared
+# with no refusal and no advisory because it landed between "large" and "wick".
+
+
+#: The reproductions the third audit turned in, verbatim. The control proves
+#: the swallowed term is ruled REFUSE and does fire on its own, so the first
+#: case is a term being HIDDEN and not a term the lexicon never knew.
+SLOT_REPRODUCTIONS = [
+    (
+        "refuse_term_inside_the_slot",
+        "XAUUSD 15m. I enter on a large near resistance wick.",
+    ),
+    (
+        "match_running_across_a_full_stop",
+        "XAUUSD 15m. I want a large trade. some wick setups only.",
+    ),
+    (
+        "control_the_same_term_on_its_own",
+        "XAUUSD 15m. I enter near resistance.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "source"), SLOT_REPRODUCTIONS)
+def test_a_wildcard_slot_cannot_swallow_a_refusal(name, source, lexicon):
+    assert _refuses(source, lexicon), name
+
+
+def test_a_refuse_term_in_a_slot_is_named_and_the_term_does_not_resolve(lexicon):
+    """Both halves matter, and only together.
+
+    Surfacing "near resistance" is necessary: it is a PID line 115 phrase and
+    the source must say so. Stopping ``large_wick`` resolving is necessary too:
+    the slot MODIFIES the measurement, so declaring a bounded parameter over
+    the top of undefined language there would attach a number to a quantity the
+    source has not finished describing.
+    """
+    source = "XAUUSD 15m. I enter on a large near resistance wick."
+    analysis = _analyse_text(source, lexicon)
+    assert not analysis.parameterised, "the wick resolved with an unruled slot"
+
+    request = build_request(source, "TRADER_EXPLANATION", "unit test")
+    result = intake(request, lexicon=lexicon, generated_at_utc=STAMP)
+    assert not result.sufficiently_defined
+    items = {item["item_id"]: item for item in result.document["unresolved_items"]}
+    assert "near_resistance" in items
+    assert "unruled_slot_large_wick" in items
+    slot_item = items["unruled_slot_large_wick"]
+    assert slot_item["severity"] == "BLOCKING"
+    # The refusal quotes the whole construction, not the slot alone: the slot
+    # on its own reads as an ordinary refusal and hides the fact that a
+    # PARAMETERISE term was sitting around it, about to resolve.
+    assert "large near resistance wick" in slot_item["source_language"]
+    assert "near resistance" in slot_item["why_unresolved"]
+
+
+def test_a_declared_marker_in_a_slot_surfaces_instead_of_being_suppressed(lexicon):
+    """The other sixteen ways in. Markers were suppressed by the same rule."""
+    source = "XAUUSD 15m. I enter on a large healthy wick."
+    analysis = _analyse_text(source, lexicon)
+    assert [f.marker.marker_id for f in analysis.unknown_findings] == ["health"]
+    assert not analysis.parameterised
+    assert [f.term.term_id for f in analysis.unruled_slot_findings] == ["large_wick"]
+
+
+def test_a_refusal_sharing_the_terms_head_noun_is_not_hidden_either(lexicon):
+    """The straddling case, which the first fix did not close.
+
+    "no wick confirmation candle" puts ``confirmation_candle`` partly in the
+    slot and partly on ``no_wick_candle``'s own ruled head noun. The main
+    passes resolve overlaps, so the refusal lost that contest and vanished —
+    the same silent exit 0, one phrasing further out. The slot check is a
+    direct scan for exactly this reason: it asks whether unresolved language
+    TOUCHES the slot, which does not depend on who won an overlap.
+    """
+    source = "XAUUSD 15m. I need a no wick confirmation candle."
+    assert _refuses(source, lexicon)
+    analysis = _analyse_text(source, lexicon)
+    assert [f.term.term_id for f in analysis.unruled_slot_findings] == ["no_wick_candle"]
+    occupants = analysis.unruled_slot_findings[0].occupants
+    assert [occupant.identity for occupant in occupants] == ["confirmation_candle"]
+
+
+@pytest.mark.parametrize("terminator", list(".!?;"))
+def test_no_term_match_may_span_a_sentence_boundary(terminator, lexicon):
+    source = "XAUUSD 15m. I want a large trade%s some wick setups only." % terminator
+    analysis = _analyse_text(source, lexicon)
+    assert not analysis.term_findings, terminator
+    assert _refuses(source, lexicon), terminator
+
+
+def test_the_sentence_boundary_rule_does_not_depend_on_the_pattern(lexicon):
+    """The rule is enforced on the MATCH, which is what makes it structural.
+
+    Tightening the four shipped patterns so their slots cannot consume a full
+    stop protects the four patterns that exist today. This test runs a lexicon
+    whose slot is deliberately NOT tightened — the advisory test fixture still
+    declares the original ``[a-z0-9.%]`` token class — and shows the pattern
+    matching straight across a full stop while the analyser still refuses to
+    accept it. A term declared tomorrow with a loose slot is covered by the
+    same rule, without anybody remembering this.
+    """
+    loose = load_lexicon(FIXTURES / "lexicon_advisory.json")
+    source = "I want a large trade. some wick setups only."
+    normalised = analyse(source, loose).normalised
+    raw = loose.term("large_wick").pattern.search(normalised)
+    assert raw is not None, "this test needs a pattern that DOES reach across"
+    assert "trade." in raw.group(0), raw.group(0)
+
+    assert not analyse(source, loose).term_findings
+
+
+def test_a_decimal_point_is_not_a_sentence_boundary(lexicon):
+    """The exception the rule needs, or "1.5" becomes two sentences."""
+    analysis = _analyse_text("XAUUSD 15m. I enter on a large 1.5 wick.", lexicon)
+    assert [f.term.term_id for f in analysis.parameterised] == ["large_wick"]
+    assert "1.5" in analysis.parameterised[0].occurrences[0].text
+
+
+def test_no_character_class_in_a_term_pattern_accepts_a_sentence_terminator(lexicon):
+    """The data-side half, checked over every term rather than the four fixed.
+
+    Belt and braces beside the match-time rule above: a slot that cannot
+    consume a terminator cannot produce a boundary-spanning match in the first
+    place. A decimal point still reaches the slot as an explicit escaped
+    literal, which is why this looks only at character classes.
+    """
+    terminators = set(lexicon.sentence_terminators)
+    for term in lexicon.terms:
+        for klass in re.findall(r"\[(?:[^\]\\]|\\.)*\]", term.raw_pattern):
+            literal = re.sub(r"\\.", "", klass[1:-1])
+            assert not terminators & set(literal), (term.term_id, klass)
+
+
+def test_a_term_pattern_may_not_hide_a_wildcard_outside_its_declared_slot(tmp_path):
+    """The loader is what makes the slot rule survive the next term.
+
+    The analyser can only decline to treat wildcard text as ruled if it can see
+    where the wildcard is, and the declared group is the only thing that tells
+    it. An undeclared wildcard is therefore not a style problem; it is this
+    defect, re-armed. So the lexicon does not load.
+    """
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["terms"][0]["pattern"] = r"\b(?:large|big)(?:[ -][a-z0-9.%]+){0,3}[ -]wicks?\b"
+    broken = tmp_path / "undeclared_wildcard.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="outside the declared"):
+        load_lexicon(broken)
+
+
+#: Everything that can land in a modifier slot: every REFUSE term's own
+#: phrasing, one word from every declared marker family, and innocuous filler
+#: that must NOT trip anything. Deliberately not a list of the strings from the
+#: audit report — the point is the class, not the three sentences that exposed
+#: it.
+_SLOT_PROBES = [
+    "",
+    "near resistance",
+    "at support",
+    "into supply",
+    "approaching the demand zone",
+    "strong trend",
+    "weak momentum",
+    "good breakout",
+    "clean break",
+    "confirmation candle",
+    "confirmed close",
+    "large",
+    "strong",
+    "good",
+    "clean",
+    "healthy",
+    "near",
+    "roughly",
+    "significant",
+    "sharp",
+    "extended",
+    "deep",
+    "quick",
+    "enough",
+    "several",
+    "ideally",
+    "key",
+    "15m",
+    "rejection",
+    "directional",
+    "upper",
+    "1.5",
+]
+
+#: One carrier per shipped term that declares a slot, plus a couple that put a
+#: sentence boundary next to the slot.
+_SLOT_CARRIERS = [
+    "XAUUSD 15m. I enter on a large {} wick.",
+    "XAUUSD 15m. I take a no-wick {} candle.",
+    "XAUUSD 15m. I need a no wick {} confirmation.",
+    "XAUUSD 15m. Only with a strong {} trend.",
+    "XAUUSD 15m. Only on a good {} breakout.",
+    "XAUUSD 15m. I enter on a large {} wick. My stop is 2 ATR below entry.",
+    "XAUUSD 15m. I want a large {} trade. some wick setups only.",
+]
+
+
+def test_no_ruled_term_match_can_hide_a_refuse_term_or_a_marker(lexicon):
+    """The class-level guarantee, asserted rather than described.
+
+    ``docs/AMBIGUITY-POLICY.md`` promises "no third path, and no silent one".
+    That sentence was false for three audits and nothing failed, because the
+    only thing enforcing it was prose. This checks it directly:
+
+    for every source below, every REFUSE term and every discretionary marker
+    the lexicon can find in the text is either inside a ruled term's LITERAL
+    span — genuinely part of a phrase the lexicon has settled — or it appears
+    in the emitted refusal. There is no third outcome, and a term match cannot
+    create one by swallowing text into its wildcard.
+    """
+    refuse_terms = [t for t in lexicon.terms if t.disposition != PARAMETERISE]
+    checked = 0
+    for carrier in _SLOT_CARRIERS:
+        for probe in _SLOT_PROBES:
+            source = carrier.format(probe).replace("  ", " ")
+            analysis = analyse(source, lexicon)
+            norm = analysis.normalised
+            spans = analysis.ruled_spans
+
+            hidden = []
+            for term in refuse_terms:
+                for match in term.pattern.finditer(norm):
+                    if match.end() <= match.start():
+                        continue
+                    if any(s <= match.start() and match.end() <= e for s, e in spans):
+                        continue
+                    hidden.append(norm[match.start() : match.end()])
+            for marker in lexicon.markers:
+                for match in marker.pattern.finditer(norm):
+                    if match.end() <= match.start():
+                        continue
+                    if any(s <= match.start() and match.end() <= e for s, e in spans):
+                        continue
+                    hidden.append(norm[match.start() : match.end()])
+            if not hidden:
+                continue
+
+            checked += 1
+            request = build_request(source, "TRADER_EXPLANATION", "unit test")
+            result = intake(request, lexicon=lexicon, generated_at_utc=STAMP)
+            assert not result.sufficiently_defined, (source, hidden)
+            emitted = json.dumps(result.document).lower()
+            for phrase in hidden:
+                assert phrase in emitted, (source, phrase)
+    assert checked > 100, "the corpus stopped exercising the property"
+
+
+# --- the ruling document and the emitted document must agree ------------------
+
+
+def _attribution_checklist() -> str:
+    """The "what every draft carries" bullet list, from the policy document.
+
+    Cut at the paragraph that follows it, because that paragraph deliberately
+    names a REMOVED field (``hsa_guessed``) and explains why it is gone. The
+    checklist is a description of what IS emitted; the paragraph is history.
+    """
+    text = POLICY.read_text(encoding="utf-8")
+    start = text.index("## Attribution: a parameterisation is never silent")
+    end = text.index("**There is no `hsa_guessed` field", start)
+    return text[start:end]
+
+
+def test_the_attribution_checklist_names_what_a_draft_actually_emits():
+    """A required boot artifact must not describe an output that does not exist.
+
+    ``docs/AMBIGUITY-POLICY.md`` is loaded by ``hsa boot``, so a fresh boot
+    reads this checklist as the specification of a draft's attribution block.
+    It named the scan result ``NO_DECLARED_REBASING_FOUND`` — the exact
+    overclaim this project withdrew, and which the SAME document explains the
+    withdrawal of a few lines above. A fresh boot was being told to expect it.
+
+    Written as a comparison rather than a spelling check, so the next stamp or
+    key that drifts fails here too.
+    """
+    checklist = _attribution_checklist()
+    quoted = set(re.findall(r"`([^`]+)`", checklist))
+
+    result = _run("example_b_rejection_wick_sequence.txt", "TRADER_EXPLANATION")
+    assert result.sufficiently_defined
+    entry = result.document["resolved_terms"][0]
+    resolution = entry["resolution"]
+    scan = resolution["basis_conflict_scan"]
+    emitted_keys = set(entry) | set(resolution) | set(scan)
+
+    def values(node):
+        if isinstance(node, dict):
+            for item in node.values():
+                yield from values(item)
+        elif isinstance(node, list):
+            for item in node:
+                yield from values(item)
+        elif isinstance(node, str):
+            yield node
+
+    emitted_values = set(values(entry))
+
+    # Every stamp-shaped value the checklist names must actually be emitted.
+    # This is what catches a retracted name being left in the description.
+    stamps = {item for item in quoted if re.fullmatch(r"[A-Z][A-Z_]{3,}", item)}
+    assert stamps, "the checklist stopped naming any emitted stamp"
+    assert stamps <= emitted_values, sorted(stamps - emitted_values)
+
+    # And every field name it lists must be a field that exists.
+    named = {
+        item.split(":")[0].strip()
+        for item in quoted
+        if re.fullmatch(r"[a-z][a-z_]*(:.*)?", item)
+    }
+    assert named, "the checklist stopped naming any emitted field"
+    assert named <= emitted_keys, sorted(named - emitted_keys)

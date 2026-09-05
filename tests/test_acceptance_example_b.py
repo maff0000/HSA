@@ -674,7 +674,7 @@ def test_criterion_7_the_window_budgets_are_arithmetically_consistent(package):
 
 
 def test_criterion_7_the_ordered_sequence_carries_real_state(package):
-    """PID line 137. An ordered sequence is inherently stateful."""
+    """PID line 138. An ordered sequence is inherently stateful."""
     state = package["state_semantics"]
     assert state["stateful"] is True
     assert state["initial_state"] in state["states"]

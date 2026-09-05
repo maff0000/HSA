@@ -179,7 +179,7 @@ trading descriptions, and every one of them resolves:
 
 | Source | Why it is not a re-basing |
 | --- | --- |
-| *"Enter on a large wick. The setup expires within 3 bars."* | The bar count is an **expiry**, which PID line 136 requires a package to state. |
+| *"Enter on a large wick. The setup expires within 3 bars."* | The bar count is an **expiry**, which PID line 137 requires a package to state. |
 | *"Enter on a large wick. My stop is 2 ATR below entry."* | The ATR sizes the **stop**, not the wick. |
 | *"Enter on a large wick above the 200 period moving average."* | The average is a **trend filter**; the wick is placed against it, not measured by it. |
 | *"Enter on a large wick that clears the previous bars' high."* | The prior bar supplies a **price level**, not a yardstick. |
@@ -239,6 +239,88 @@ over an ATR stop or a bar-count expiry: a stamp claiming more than the check
 established, which is the same class of defect as the `hsa_guessed: false`
 field this document already removed.
 
+## A wildcard slot is not ruled text
+
+A term's pattern is part literal and part wildcard. The literal parts are the
+phrase this document rules on. The `basis_slot` group is a **wildcard run of
+words that merely sits between them**, and nobody has ruled on those words at
+all.
+
+The analyser stops scanning inside a ruled term's match — a phrase this
+document has settled should not also be reported as an open question. That is
+right for the literal parts and **wrong for the slot**, and the consequence was
+the worst kind of defect this document exists to prevent: a silent one.
+
+```
+"XAUUSD 15m. I enter on a large near resistance wick."
+  -> exit 0, resolved "large near resistance wick", nothing unresolved
+```
+
+`"near resistance"` is one of the five phrases **PID line 115** says must never
+be guessed. On its own it refuses, correctly. Between `"large"` and `"wick"` it
+disappeared — no refusal, no advisory, no mention — because it fell inside a
+span the analyser had already written off as ruled. The same hole swallowed all
+sixteen declared marker families and a second must-not-guess phrase, and no
+shipped fixture triggered it, which is why the suite stayed green through two
+audits.
+
+That also broke the guarantee the *previous* section leans on. The re-basing
+guard is tuned for precision and misses on purpose; what made that safe to ship
+was that unknown terms fail closed underneath it. They did not.
+
+Two rules close it, and both are enforced on **every** term rather than on the
+patterns that happened to expose the problem:
+
+1. **Only the literal parts of a match suppress further scanning.** Slot
+   contents are scanned like the ordinary prose they are. A REFUSE term or a
+   discretionary marker sitting in a slot is reported exactly as it would be
+   anywhere else in the source. `basis_qualifier_policy.attachment` already
+   treated the slot as scannable for re-basings — its `SLOT` form is *only*
+   about what is in there — so this extends one existing idea rather than
+   adding one.
+
+2. **A term match may not span a sentence boundary.** The same wildcard let a
+   match run across a full stop and take the next sentence's opening words with
+   it (`"a large trade. some wick setups only"` matched `large_wick`), hiding
+   everything it swallowed. A `.` between two digits is a decimal point, not a
+   terminator, so `1.5` is still one token.
+
+### Why a PARAMETERISE term whose slot is unresolved does not resolve
+
+Surfacing the hidden refusal is not enough on its own. The words in the slot
+**modify the measurement** — that is what a modifier slot is — so undefined
+language there is undefined language about the very thing being measured.
+Declaring `min_wick_to_range_ratio` over the top of *"large near resistance
+wick"* would attach a bounded parameter to a quantity the source has not
+finished describing. So the term does not resolve, and the draft says why,
+naming the term, the slot text and what was found in it
+(`term_match_policy.unruled_slot_content`).
+
+### Why this is structural rather than four tightened patterns
+
+Both rules could have been written as regex fixes — forbid `.` in the slot's
+character class, enumerate the words a slot accepts. That would have fixed the
+four patterns that exist today and nothing else. Instead:
+
+- The sentence-boundary rule is enforced **on the match**, in the analyser, so
+  it holds for a term nobody has declared yet. The patterns are tightened as
+  well, and `tests/test_ambiguity.py` proves the rule still holds when a
+  pattern is *not* tightened, by running a deliberately loose fixture lexicon
+  through it.
+- The loader **refuses to load** a term whose pattern contains a wildcard
+  outside the declared `basis_slot` group. The analyser can only decline to
+  treat wildcard text as ruled if it can see where the wildcard is, and the
+  named group is the only thing that tells it. An undeclared wildcard is
+  therefore not a style problem; it is this defect, re-armed, and the lexicon
+  simply does not load.
+- The slot check is a **direct scan**, not a filter over what the main passes
+  accepted. The main passes resolve overlaps, so a refusal that overlapped the
+  ruled term *both* ways — partly in the slot, partly sharing its head noun —
+  lost that contest and vanished anyway: `"no wick confirmation candle"`
+  resolved at exit 0 while containing PID line 117's *"confirmation candle"*
+  verbatim. Asking the narrower question — *is there unresolved language
+  touching this slot?* — does not care who won the overlap.
+
 ## Attribution: a parameterisation is never silent
 
 A parameterised term must be **visible and attributable in the output**.
@@ -259,7 +341,7 @@ Every parameterised resolution in an intake draft carries:
 - `basis_conflict_scan` — what was actually run against the source: the
   declared vocabulary, the number of qualifiers in it, the lexicon version,
   the window rule, the verbatim text inspected, the `result`
-  (`NO_DECLARED_REBASING_FOUND`), and the scan's own declared `limits`;
+  (`NO_ATTACHED_REBASING_FOUND`), and the scan's own declared `limits`;
 - `default_status: "PROVISIONAL_PENDING_EVIDENCE"`.
 
 **There is no `hsa_guessed` field, and its absence is deliberate.** It was
@@ -349,6 +431,13 @@ span. So the lexicon moved from **1.2.0** to **1.3.0**, and every
 `PARAMETERISE` pattern now declares a `basis_slot` group, which the loader
 requires rather than assumes.
 
+Ruling that a term's wildcard slot is not ruled text changed which sources
+resolve again — `"a large near resistance wick"` refuses now and did not
+before — and added a fourth ruling block, `term_match_policy`. So the lexicon
+moved from **1.3.0** to **1.4.0**, and every term pattern's wildcard is now
+declared as a `basis_slot` group, including the two `REFUSE` patterns that
+carried an undeclared one.
+
 `strategies/wick_rejection_sequence/0.1.0` was ingested under lexicon 1.0.0
 and its provenance records the bounds that version declared — 0.3 to 0.9 and
 0.0 to 0.25. **That record is history and stays correct as written**: it says
@@ -362,7 +451,7 @@ they match.
 
 That defence is deliberate and it holds, but it rests on a reader noticing a
 version number. So this paragraph is the **in-document superseded marker**:
-lexicon 1.0.0 is superseded three times over (1.1.0, 1.2.0, 1.3.0), and any
+lexicon 1.0.0 is superseded four times over (1.1.0, 1.2.0, 1.3.0, 1.4.0), and any
 draft or package citing it — `wick_rejection_sequence/0.1.0` is the only one
 in the inventory — records a ruling that has since moved. The marker is
 placed **here**, in the governing document, rather than written into the
@@ -480,6 +569,17 @@ Every recognised term is either parameterised with visible attribution, or
 itemised as unresolved with an owner and a stated resolution. There is no
 third path, and no silent one.
 
+That sentence was **false for three audits**, and the way it was false is
+instructive: nothing failed, nothing was reported, and the guarantee read
+exactly as it does now. A term's wildcard slot swallowed recognised
+discretionary language and the scan never looked inside — see "A wildcard slot
+is not ruled text". So the claim is no longer left as prose to be trusted.
+`tests/test_ambiguity.py` asserts it directly, over a generated corpus that
+drops every declared marker family and every `REFUSE` term into every ruled
+term's slot: for each one, either the text is genuinely inside a term's
+LITERAL span, or it is reported. A guarantee that only a human can check is a
+guarantee that stays broken quietly.
+
 Closing that first gap — catching discretionary claims that use no declared
 marker — is a matter of extending the declared vocabulary as real sources
 expose gaps. It is not a matter of making the analyser cleverer, and it must
@@ -498,5 +598,11 @@ this whole document exists to prevent.
    Candidate definitions may be offered; the contract deliberately provides
    no way to mark one as chosen, because choosing is the resolution and it
    happens outside the document.
-4. If unsure — **leave it out**. An absent term refuses. That is the safe
+4. Either way, if the pattern accepts words the lexicon does not enumerate,
+   **wrap that run in the `(?P<basis_slot>...)` group**. It is not optional and
+   it is not style: it is the only thing that tells the analyser which part of
+   a match is ruled text and which part is wildcard, and the loader refuses a
+   term pattern whose wildcard sits outside it. See "A wildcard slot is not
+   ruled text" for what an undeclared one costs.
+5. If unsure — **leave it out**. An absent term refuses. That is the safe
    direction, and it is the direction the design deliberately falls in.

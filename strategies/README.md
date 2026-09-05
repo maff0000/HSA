@@ -76,11 +76,17 @@ strategies/<id>/<version>/evidence.json $.references[2] is not a valid cer_refer
   at $.reference_type: 'PROMOTION_EVIDENC' is not one of [...]
 ```
 
-> The envelope fields around `references[]` are **not yet standardised**:
-> `gold_context_breakout` uses `document_type` / `cer_status`, and
-> `wick_rejection_sequence` uses `$hsa_evidence` / `cer_live`. Both are read
-> correctly, because detection does not depend on them, but the two should
-> converge on one envelope. That convergence is not this document's to make.
+> The envelope around `references[]` is **one shape, and it is pinned**. Both
+> indexes declare `document_type: "hsa_strategy_evidence_index"` and
+> `cer_status`, and
+> `tests/test_cer_evidence_container.py::test_every_governed_evidence_index_uses_the_same_envelope`
+> fails if a governed index diverges from it or grows any `$hsa_`-prefixed
+> key. A container is emphatically **not** a contract kind — that is why it
+> carries no `$hsa_kind` and why nothing routes it to a schema — so the
+> `$hsa_` namespace, which belongs to the routable documents, is the one thing
+> the envelope may not borrow. This note previously recorded the two indexes
+> as divergent (`$hsa_evidence` / `cer_live` on one of them); they converged,
+> and the description outlived the state it described.
 
 This file is an index, not a store. CER owns evidence; HSA points at it
 (`PID.md:160-181`). While CER is not live every reference declares

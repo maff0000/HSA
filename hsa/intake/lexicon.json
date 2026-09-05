@@ -1,8 +1,8 @@
 {
-  "lexicon_version": "1.3.0",
+  "lexicon_version": "1.4.0",
   "ruling_document": "docs/AMBIGUITY-POLICY.md",
   "ratified_by": "HSA_ARCHITECT_RULING",
-  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). A ruled term is also only ruled for the claim its pattern declares: basis_qualifiers lists the constructions that re-base a term onto a different measurement, and basis_qualifier_policy states what happens when one is found ATTACHED to the ruled measurement inside the declared window (a REFUSE, like any undeclared term), which attachments count (basis_qualifier_policy.attachment), and what that check cannot see (basis_qualifier_policy.limits). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.\n\nEvery PARAMETERISE term declares realised_by: the catalogue entry and parameter that its declared parameter is actually implemented as. Intake and the catalogue are two halves of one ruling, and the link between them is DECLARED here rather than left to matching names — the names deliberately do not match. tests/test_lexicon_catalogue_agreement.py fails if a link points at a catalogue entry or parameter that does not exist, or if the two sides disagree on type, units, default or allowed_range. A PARAMETERISE term also declares hermes_basis_relationship, which states how the basis fields intake declares are derived from the fields the catalogue entry actually consumes.",
+  "description": "The declared intake lexicon. This file is DATA, deliberately not code: the ruling on each discretionary phrase must be reviewable by a human without reading Python. Every entry is governed by docs/AMBIGUITY-POLICY.md, which states the boundary this file applies: PARAMETERISE a term whose measurement basis is known but whose threshold is unset; REFUSE a term whose measurement basis is itself undefined. Anything not declared here refuses (see unknown_term_policy). A ruled term is also only ruled for the LITERAL parts of its pattern: term_match_policy states that a term's declared basis_slot is a wildcard and not ruled text, so a REFUSE term or a discretionary marker sitting in it still surfaces, and that no term match may span a sentence boundary. A ruled term is also only ruled for the claim its pattern declares: basis_qualifiers lists the constructions that re-base a term onto a different measurement, and basis_qualifier_policy states what happens when one is found ATTACHED to the ruled measurement inside the declared window (a REFUSE, like any undeclared term), which attachments count (basis_qualifier_policy.attachment), and what that check cannot see (basis_qualifier_policy.limits). Patterns are Python regular expressions matched against the source text after lowercasing and whitespace collapsing.\n\nEvery PARAMETERISE term declares realised_by: the catalogue entry and parameter that its declared parameter is actually implemented as. Intake and the catalogue are two halves of one ruling, and the link between them is DECLARED here rather than left to matching names — the names deliberately do not match. tests/test_lexicon_catalogue_agreement.py fails if a link points at a catalogue entry or parameter that does not exist, or if the two sides disagree on type, units, default or allowed_range. A PARAMETERISE term also declares hermes_basis_relationship, which states how the basis fields intake declares are derived from the fields the catalogue entry actually consumes.",
 
   "unknown_term_policy": {
     "disposition": "REFUSE",
@@ -15,6 +15,35 @@
       "responsible": "MATT"
     }
   },
+
+    "term_match_policy": {
+      "description": "How much of a term match is actually RULED text, and where a match may end. A term's pattern is part literal and part wildcard: the literal parts are the phrase the lexicon rules on, and the declared basis_slot group is a wildcard run of words that merely sits between them. Treating the whole matched span as ruled is what let a slot swallow \"near resistance\" — a PID line 115 must-not-guess phrase — and hide it, because anything a ruled term consumed was never scanned again. This block states the two rules that close that, and both are enforced for EVERY term, not for the terms that happened to expose the bug.",
+      "sentence_boundary": {
+        "rule": "SENTENCE",
+        "sentence_terminators": ".!?;",
+        "decimal_exception": "A '.' between two digits is a decimal point and not a terminator, so \"1.5\" is one token and \"trade.\" is the end of a sentence.",
+        "why": "A term match may not span a sentence boundary. A ruled phrase is a phrase, and \"a large trade. some wick setups only\" is not one — it is the tail of one sentence and the head of the next, joined only because a wildcard slot tolerated a token ending in a full stop. Enforced on the MATCH, in the analyser, rather than left to each pattern's character classes: a pattern-by-pattern fix holds only until the next pattern is written, and this rule holds for a term nobody has declared yet. The patterns are also tightened so their slots cannot consume a terminator in the first place, which is belt and braces, not the guarantee."
+      },
+      "slot_is_not_ruled_text": {
+        "rule": "The words a term's declared basis_slot consumed are NOT part of the ruled phrase. Only the literal parts of the match — the span minus the slot — suppress further scanning. Every other ruled term and every discretionary marker is matched against slot contents exactly as if the slot were ordinary prose, because that is what it is.",
+        "why": "The suppression rule was justified as \"text inside the match is part of the ruled phrase the lexicon declares\". For the literal parts that is true. For the wildcard slot it is false, and the consequence was silent: \"a large near resistance wick\" resolved at exit 0 with no refusal and no advisory, because near_resistance and the proximity marker both fell inside a span the analyser had already written off as ruled. basis_qualifier_policy.attachment already treats the slot as scannable for re-basings (attachment form SLOT); this states the same thing for the other two things that can be in there."
+      },
+      "unruled_slot_content": {
+        "disposition": "REFUSE",
+        "severity": "BLOCKING",
+        "blocks": [
+          "ATOMIC_DECOMPOSITION",
+          "PARAMETER_DEFINITION"
+        ],
+        "precedence": "A PARAMETERISE term whose slot contains a REFUSE term or an unruled discretionary marker does NOT resolve. The slot modifies the measurement, so undefined language sitting in it is undefined language about the measurement; resolving the term anyway would declare a parameter for a quantity the source has not finished describing. Refusing here is the same fail-closed direction the rest of this file takes.",
+        "why_unresolved_template": "HSA recognised the ruled term \"{term_label}\" here, but the words its pattern tolerates between its ruled adjective and its ruled head noun — \"{slot_text}\" — are themselves unresolved: {findings}. Those words modify the measurement, so the ruled basis for \"{term_label}\" ({measurement_basis}) does not describe what the source asked for. The slot is a wildcard and is not ruled text; language inside it fails closed exactly as it would anywhere else in the source (PID line 39; docs/AMBIGUITY-POLICY.md, 'A wildcard slot is not ruled text').",
+        "resolution_needed": {
+          "kind": "MEASURABLE_DEFINITION",
+          "description_template": "Resolve the unresolved language inside \"{phrase}\" first: {findings}. Then restate the rule so \"{term_label}\" is either qualified by measured words or left unqualified, in which case its ratified basis ({measurement_basis}) applies.",
+          "responsible": "MATT"
+        }
+      }
+    },
 
   "discretionary_markers": [
     {"marker_id": "magnitude", "reason": "an unquantified size adjective", "pattern": "\\b(?:large|larger|big|bigger|huge|sizeable|sizable|massive)\\b"},
@@ -70,7 +99,7 @@
         {"gloss_id": "x_means", "reason": "the source defines the ruled word outright", "pattern": "\\b(?:a\\s+|an\\s+|the\\s+)?{anchor}\\s+(?:here\\s+)?means\\b"},
         {"gloss_id": "x_defined_as", "reason": "the source defines or measures the ruled word as something", "pattern": "\\b{anchor}\\b[^.;!?]{0,20}?\\b(?:defined|define|measured|measure|judged|assessed)\\s+as\\b"}
       ],
-      "not_attached": "Deliberately NOT treated as re-basing, because each attaches to something other than the ruled measurement: a stop or target sized in ATR (\"a large wick. My stop is 2 ATR below entry.\"); a bar-count expiry or persistence window, which PID line 136 REQUIRES a package to state (\"the setup expires within 3 bars\", \"expires after 4 bars\"); a trend or location filter naming an average (\"a large wick above the 200 period moving average\"); a reference to prior bars used as a price level rather than a yardstick (\"a large wick that clears the previous bars' high\"). These resolve, and source_basis_agreement stays NOT_VERIFIED."
+      "not_attached": "Deliberately NOT treated as re-basing, because each attaches to something other than the ruled measurement: a stop or target sized in ATR (\"a large wick. My stop is 2 ATR below entry.\"); a bar-count expiry or persistence window, which PID line 137 REQUIRES a package to state (\"the setup expires within 3 bars\", \"expires after 4 bars\"); a trend or location filter naming an average (\"a large wick above the 200 period moving average\"); a reference to prior bars used as a price level rather than a yardstick (\"a large wick that clears the previous bars' high\"). These resolve, and source_basis_agreement stays NOT_VERIFIED."
     },
     "why_unresolved_template": "HSA recognised the ruled term \"{term_label}\" here, but the text around it re-bases the measurement: {qualifiers}. The ratified basis for \"{term_label}\" is: {measurement_basis} docs/AMBIGUITY-POLICY.md rules on the phrase the lexicon declares, and anything that changes the basis is a different term. An undeclared term refuses rather than being resolved onto a basis the source did not state, because applying the ruled basis here would make HSA assert a measurement the source itself displaced (PID line 39; docs/AMBIGUITY-POLICY.md, 'A ruled term can be re-based by its context').",
     "resolution_needed": {
@@ -101,7 +130,7 @@
       "label": "large wick",
       "disposition": "PARAMETERISE",
       "pid_reference": "PID line 114; required by acceptance Example B, PID line 242",
-      "pattern": "\\b(?:large|larger|big|bigger|huge|long|sizeable|sizable|significant|substantial)(?P<basis_slot>(?:[ -][a-z0-9.%]+){0,3})[ -]wicks?\\b",
+      "pattern": "\\b(?:large|larger|big|bigger|huge|long|sizeable|sizable|significant|substantial)(?P<basis_slot>(?:[ -][a-z0-9%]+(?:\\.[a-z0-9%]+)*){0,3})[ -]wicks?\\b",
       "measurement_basis": "Wick length as a fraction of the total bar range (candle.high minus candle.low) of the evaluated bar, measured on that one bar.",
       "basis_rationale": "Both quantities are unambiguous single-bar HERMES facts. No level must be constructed, no lookback chosen, and no competing construction of 'wick' exists that would rank real bars differently. Only the cut-off is missing, and a cut-off is a bounded parameter (PID line 140), not a trading decision.",
       "parameters": [
@@ -147,7 +176,7 @@
       "label": "no-wick candle",
       "disposition": "PARAMETERISE",
       "pid_reference": "PID line 55 names no-wick candle as an atomic example; required by acceptance Example B, PID line 242",
-      "pattern": "\\bno[ -]wicks?(?P<basis_slot>(?:[ -][a-z0-9.%]+){0,3})[ -](?:candles?|bars?|confirmations?|closes?|bodies|body)\\b|\\bno[ -]wicks?\\b",
+      "pattern": "\\bno[ -]wicks?(?P<basis_slot>(?:[ -][a-z0-9%]+(?:\\.[a-z0-9%]+)*){0,3})[ -](?:candles?|bars?|confirmations?|closes?|bodies|body)\\b|\\bno[ -]wicks?\\b",
       "measurement_basis": "The larger of the two wicks as a fraction of the total bar range (candle.high minus candle.low) of the evaluated bar, required to be at or below a declared cap, measured on that one bar.",
       "basis_rationale": "The same single-bar basis as large_wick, read in the opposite direction. 'No wick' cannot mean exactly zero on real data, so a tolerance is unavoidable; that tolerance is a bounded parameter rather than a choice between constructions.",
       "parameters": [
@@ -228,7 +257,7 @@
       "label": "strong trend",
       "disposition": "REFUSE",
       "pid_reference": "PID line 116",
-      "pattern": "\\b(?:strong|stronger|strongly|weak|weaker|weakly|solid|healthy|powerful|clear|good)(?:[ -][a-z0-9.%]+){0,2}[ -](?:trends?|trending|uptrends?|downtrends?|momentum|bias)\\b",
+      "pattern": "\\b(?:strong|stronger|strongly|weak|weaker|weakly|solid|healthy|powerful|clear|good)(?P<basis_slot>(?:[ -][a-z0-9%]+(?:\\.[a-z0-9%]+)*){0,2})[ -](?:trends?|trending|uptrends?|downtrends?|momentum|bias)\\b",
       "measurement_basis": null,
       "why_unresolved": "'Trend strength' names no quantity. ADX, moving-average separation, the slope of a regression over a lookback, the count of consecutive higher highs, and net displacement over a window are all defensible readings of the same phrase, and they disagree on real data — they can rank the same two charts in opposite orders. The missing input is therefore the construction itself, not a threshold on an agreed construction. Once a construction is chosen, its cut-off becomes an ordinary bounded parameter.",
       "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "HERMES_MAPPING"],
@@ -297,7 +326,7 @@
       "label": "good breakout",
       "disposition": "REFUSE",
       "pid_reference": "PID line 118",
-      "pattern": "\\b(?:good|clean|proper|decent|nice|quality|valid|real|true|strong|convincing|textbook)(?:[ -][a-z0-9.%]+){0,2}[ -](?:breakouts?|break[ -]outs?|breaks?|breakdowns?)\\b",
+      "pattern": "\\b(?:good|clean|proper|decent|nice|quality|valid|real|true|strong|convincing|textbook)(?P<basis_slot>(?:[ -][a-z0-9%]+(?:\\.[a-z0-9%]+)*){0,2})[ -](?:breakouts?|break[ -]outs?|breaks?|breakdowns?)\\b",
       "measurement_basis": null,
       "why_unresolved": "The qualifier does not attach to any stated quantity. It could mean closing beyond the level rather than wicking through it, expansion in volume, follow-through on the next bar, or the absence of an immediate return inside the range. Those are different mechanical tests, not different settings of one test, so no single parameter can carry the meaning. The level being broken is frequently undefined as well.",
       "blocks": ["ATOMIC_DECOMPOSITION", "PARAMETER_DEFINITION", "TIMING_SEMANTICS"],

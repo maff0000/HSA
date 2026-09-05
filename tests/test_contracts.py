@@ -341,3 +341,69 @@ def test_a_parameter_cannot_declare_both_a_range_and_a_value_list(valid_doc):
     with pytest.raises(DocumentInvalidError) as caught:
         validate_document(document)
     assert caught.value.json_path == "$.parameters[0]"
+
+
+# --- a citation in a frozen contract is a claim about PID.md -----------------
+
+#: What each ``strategy_package`` property IS, in the PID's own words, stated
+#: here independently of the schema. The schema says which PID line it cites;
+#: ``PID.md`` decides whether that line says this. The same off-by-one that
+#: reached product output through ``not_yet_specified`` had also reached the
+#: frozen schema descriptions — chain, timing, persistence, expiry and state
+#: semantics each cited the bullet above the one they meant, and ``thesis``
+#: cited "instrument(s)".
+PACKAGE_PROPERTY_MEANS = {
+    "thesis": "economic/trading thesis",
+    "intended_horizon": "intended horizon/style",
+    "required_hermes_fields": "required HERMES fields",
+    "atomic_strategies": "atomic strategy definitions",
+    "chain": "chain definition",
+    "timing": "timing/persistence/expiry",
+    "persistence": "timing/persistence/expiry",
+    "expiry": "timing/persistence/expiry",
+    "state_semantics": "state semantics",
+    "invalidation_conditions": "invalidation/validity conditions",
+    "validity_conditions": "invalidation/validity conditions",
+    "parameters": "parameter definitions and allowed ranges",
+    "output_contract": "expected output contract",
+    "deterministic_test_cases": "deterministic test cases",
+    "evidence_requirements": "backtest/evidence requirements",
+    "acceptance_criteria": "acceptance/rejection criteria",
+    "rejection_criteria": "acceptance/rejection criteria",
+    "provenance": "provenance to original strategy source",
+    "cer_references": "CER identity/evidence references",
+}
+
+
+def test_every_pid_citation_in_the_package_schema_points_at_what_it_claims():
+    """A frozen contract's descriptions are read as authority. They must hold.
+
+    Only the properties named above are checked, and only their FIRST citation:
+    several descriptions cite a second line for a different reason (``intended_horizon``
+    also cites PID line 194 about portfolio fit), and that is not what this is
+    about.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    pid = (root / "PID.md").read_text(encoding="utf-8").splitlines()
+    schema = read_json_file(contracts_dir() / "strategy_package.schema.json")
+    properties = schema["properties"]
+
+    missing = set(PACKAGE_PROPERTY_MEANS) - set(properties)
+    assert not missing, "this table names properties the schema does not have: %s" % (
+        ", ".join(sorted(missing))
+    )
+
+    for name, expected in sorted(PACKAGE_PROPERTY_MEANS.items()):
+        description = properties[name].get("description", "")
+        found = re.search(r"PID lines? (\d+)(?:\s*-\s*(\d+))?", description)
+        assert found, "%s has no PID citation to check" % name
+        first = int(found.group(1))
+        last = int(found.group(2) or first)
+        cited = " ".join(pid[first - 1 : last])
+        assert expected.lower() in cited.lower(), (
+            "strategy_package.%s cites PID line(s) %d-%d, which say %r, not %r"
+            % (name, first, last, cited.strip(), expected)
+        )

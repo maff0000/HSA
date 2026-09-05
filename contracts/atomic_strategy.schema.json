@@ -22,7 +22,7 @@
     "description": {"$ref": "common.defs.json#/$defs/non_empty_string"},
     "thesis": {
       "$ref": "common.defs.json#/$defs/non_empty_string",
-      "description": "The economic or market-mechanical reason this pattern is expected to carry information (PID line 130)."
+      "description": "The economic or market-mechanical reason this pattern is expected to carry information (PID line 129)."
     },
     "instruments": {
       "type": "array",

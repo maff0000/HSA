@@ -36,7 +36,13 @@ from typing import Any, Mapping, Sequence
 from jsonschema import Draft202012Validator
 
 from hsa.contracts import contracts_dir, validate_document
-from hsa.intake.analyser import Analysis, RebasedFinding, TermFinding, UnknownFinding
+from hsa.intake.analyser import (
+    Analysis,
+    RebasedFinding,
+    TermFinding,
+    UnknownFinding,
+    UnruledSlotFinding,
+)
 from hsa.intake.errors import IntakeError
 
 __all__ = [
@@ -67,13 +73,13 @@ CONTRACT_VERSION = "1.0.0"
 #: outstanding obligation rather than as an oversight.
 NOT_YET_SPECIFIED: tuple[tuple[str, str], ...] = (
     ("atomic_strategies", "Atomic decomposition of the measurable logic (PID line 133)."),
-    ("chain", "Chain composition using ALL / ANY / SEQUENCE / CONTEXT_TRIGGER (PID line 134)."),
+    ("chain", "Chain composition using ALL / ANY / SEQUENCE / CONTEXT_TRIGGER (PID line 135)."),
     ("timeframe_roles", "Assignment of CONTEXT / LOCATION / CONFIRMATION / TRIGGER to timeframes (PID lines 84-97)."),
-    ("direction_semantics", "Emitted directions and the rule that derives them (PID line 135)."),
-    ("timing", "Evaluation trigger and timeframe (PID line 136)."),
-    ("persistence", "Whether the signal persists, and for how long (PID line 136)."),
-    ("expiry", "Whether the setup expires, and the rule (PID line 136)."),
-    ("state_semantics", "States, initial state and reset conditions (PID line 137)."),
+    ("direction_semantics", "Emitted directions and the rule that derives them (PID line 136)."),
+    ("timing", "Evaluation trigger and timeframe (PID line 137)."),
+    ("persistence", "Whether the signal persists, and for how long (PID line 137)."),
+    ("expiry", "Whether the setup expires, and the rule (PID line 137)."),
+    ("state_semantics", "States, initial state and reset conditions (PID line 138)."),
     ("invalidation_conditions", "What invalidates an in-progress setup (PID line 139)."),
     ("validity_conditions", "Market conditions under which the strategy is expected to hold (PID line 139)."),
     ("output_contract", "Normalised output shape including the reason field (PID line 141)."),
@@ -263,6 +269,43 @@ def _unresolved_from_rebased(finding: RebasedFinding, analysis: Analysis) -> dic
     }
 
 
+def _unresolved_from_unruled_slot(
+    finding: UnruledSlotFinding, analysis: Analysis
+) -> dict:
+    """A ruled term whose own wildcard slot holds unresolved language.
+
+    ``source_language`` quotes the whole matched term, not just the slot. The
+    slot on its own — "near resistance" out of "a large near resistance wick" —
+    reads as an ordinary refusal and hides the fact that a PARAMETERISE term
+    was sitting around it about to resolve. What a reviewer needs to see is the
+    construction that nearly went through.
+    """
+    policy = analysis.lexicon.unruled_slot_policy
+    term = finding.term
+    resolution = policy["resolution_needed"]
+    fields = {
+        "phrase": " ".join(finding.occurrences[0].text.split()),
+        "term_label": term.label,
+        "term_id": term.term_id,
+        "measurement_basis": term.measurement_basis or "",
+        "slot_text": finding.slot_text,
+        "findings": finding.occupant_summary,
+    }
+    return {
+        "item_id": finding.item_id,
+        "source_language": finding.occurrences[0].text,
+        "location": finding.location,
+        "why_unresolved": policy["why_unresolved_template"].format(**fields),
+        "blocks": list(policy["blocks"]),
+        "severity": policy["severity"],
+        "resolution_needed": {
+            "kind": resolution["kind"],
+            "description": resolution["description_template"].format(**fields),
+            "responsible": resolution["responsible"],
+        },
+    }
+
+
 def _unresolved_from_term(finding: TermFinding) -> dict:
     term = finding.term
     item: dict[str, Any] = {
@@ -304,15 +347,20 @@ def _unresolved_from_unknown(finding: UnknownFinding, analysis: Analysis) -> dic
 
 
 def unresolved_items(analysis: Analysis) -> list[dict]:
-    """Every unresolved item: ruled refusals, then re-based terms, then unknowns.
+    """Every unresolved item, in one fixed order.
 
-    Order is fixed so two runs over the same source produce byte-identical
-    documents apart from the timestamp.
+    Ruled refusals, then re-based terms, then terms whose wildcard slot holds
+    unresolved language, then unknowns. Order is fixed so two runs over the
+    same source produce byte-identical documents apart from the timestamp.
     """
     items = [_unresolved_from_term(finding) for finding in analysis.refused]
     items.extend(
         _unresolved_from_rebased(finding, analysis)
         for finding in analysis.rebased_findings
+    )
+    items.extend(
+        _unresolved_from_unruled_slot(finding, analysis)
+        for finding in analysis.unruled_slot_findings
     )
     items.extend(
         _unresolved_from_unknown(finding, analysis)

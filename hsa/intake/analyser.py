@@ -4,6 +4,27 @@ WHAT THIS IS: a rules-based analyser over the declared lexicon. It matches
 declared surface patterns, first the ruled terms and then the discretionary
 markers, and reports every marker occurrence that no ruled term consumed.
 
+WHAT "CONSUMED" MEANS, EXACTLY. A term pattern is part literal and part
+wildcard. The literal parts are the phrase the lexicon rules on; the declared
+``basis_slot`` group is a wildcard run of words that merely sits between them.
+Only the literal parts suppress further scanning. The slot does not, and
+treating it as if it did was a silent hole: "a large near resistance wick"
+matched ``large_wick`` end to end, so ``near_resistance`` — a PID line 115
+must-not-guess phrase — and the proximity marker both fell inside a span the
+analyser had already written off as ruled, and the source resolved at exit 0
+with no refusal and no advisory. Text in the slot is now scanned exactly like
+any other prose, and a PARAMETERISE term whose slot holds unresolved language
+does not resolve (``term_match_policy`` in the lexicon).
+
+A TERM MATCH MAY NOT SPAN A SENTENCE BOUNDARY. The same wildcard let a match
+run across a full stop — "a large trade. some wick setups only" matched
+``large_wick`` — and swallow the start of the next sentence with it. The rule
+is enforced here, on the match, rather than by tightening each pattern:
+patterns are tightened too, but a pattern-level fix protects only the patterns
+that exist today, and this one holds for a term nobody has declared yet. A
+``.`` between two digits is a decimal point, not a terminator, so "1.5" stays
+one token.
+
 Between those two passes sits the basis-qualifier check. A ruled
 PARAMETERISE term is only ruled for the claim the lexicon declares: "large
 wick" is ratified onto a single-bar wick-over-range basis, and "large wick
@@ -31,7 +52,7 @@ attach (``basis_qualifier_policy.attachment`` in the lexicon):
                 ATR". The gloss must NAME a word the match consumed.
 
 Everything else co-occurs and is left alone, deliberately. An ATR stop, a
-bar-count expiry (which PID line 136 requires a package to state), a
+bar-count expiry (which PID line 137 requires a package to state), a
 moving-average trend filter and a prior-bar price reference are ordinary,
 correct trading prose; refusing them would be a defect of its own, not
 caution. This is PRECISION chosen over RECALL, and what makes that safe is
@@ -75,6 +96,7 @@ __all__ = [
     "TermFinding",
     "QualifierHit",
     "RebasedFinding",
+    "UnruledSlotFinding",
     "UnknownFinding",
     "Analysis",
     "normalise",
@@ -245,12 +267,82 @@ class UnknownFinding:
 
 
 @dataclass(frozen=True)
+class SlotOccupant:
+    """One unresolved thing found inside a term's wildcard slot."""
+
+    #: ``REFUSE_TERM`` or ``DISCRETIONARY_MARKER``.
+    kind: str
+    #: The lexicon identity that recognised it: a term_id or a marker_id.
+    identity: str
+    #: Why it is unresolved, in the lexicon's own words.
+    reason: str
+    occurrence: Occurrence
+
+    def describe(self) -> str:
+        return "%s (%s: %s) at %s: %r" % (
+            self.identity,
+            self.kind,
+            self.reason,
+            self.occurrence.describe(),
+            " ".join(self.occurrence.text.split()),
+        )
+
+
+@dataclass(frozen=True)
+class UnruledSlotFinding:
+    """A PARAMETERISE term whose own modifier slot holds unruled language.
+
+    The slot is the run of words a term's pattern tolerates between its ruled
+    adjective and its ruled head noun. Those words modify the MEASUREMENT, so
+    if one of them is a REFUSE term or an unruled discretionary marker, the
+    source has not finished saying what it wants measured. Resolving the term
+    anyway would declare a parameter over the top of undefined language, which
+    is the silent guess PID line 39 forbids — so it fails closed, exactly like
+    an undeclared term.
+    """
+
+    item_id: str
+    term: Term
+    occurrences: tuple[Occurrence, ...]
+    #: The slot text itself, quoted verbatim, one per offending occurrence.
+    slots: tuple[Occurrence, ...]
+    occupants: tuple[SlotOccupant, ...]
+
+    @property
+    def location(self) -> str:
+        return "; ".join(occurrence.describe() for occurrence in self.occurrences)
+
+    @property
+    def slot_text(self) -> str:
+        seen: list[str] = []
+        for slot in self.slots:
+            text = " ".join(slot.text.split()).strip(" -")
+            if text and text not in seen:
+                seen.append(text)
+        return " / ".join(seen)
+
+    @property
+    def occupant_summary(self) -> str:
+        return "; ".join(occupant.describe() for occupant in self.occupants)
+
+
+@dataclass(frozen=True)
 class Analysis:
     text: str
     lexicon: Lexicon
     term_findings: tuple[TermFinding, ...]
     unknown_findings: tuple[UnknownFinding, ...]
     rebased_findings: tuple[RebasedFinding, ...] = ()
+    unruled_slot_findings: tuple[UnruledSlotFinding, ...] = ()
+    #: The lowercased, whitespace-collapsed copy the scan actually ran over.
+    normalised: str = ""
+    #: Spans of ``normalised`` that a ruled term LITERALLY claimed — the
+    #: matched spans minus their wildcard slots. Exposed because it is the
+    #: exact thing this analyser is allowed to stop scanning, and a guarantee
+    #: nobody can inspect is a guarantee nobody can check: see
+    #: ``tests/test_ambiguity.py``, which asserts that nothing recognisable as
+    #: discretionary hides outside these spans without being reported.
+    ruled_spans: tuple[tuple[int, int], ...] = ()
 
     @property
     def parameterised(self) -> tuple[TermFinding, ...]:
@@ -363,6 +455,26 @@ def _slug(value: str, limit: int) -> str:
     return slug[:limit].rstrip("_")
 
 
+def _is_terminator(norm: str, index: int, stops: frozenset) -> bool:
+    """Whether the character at ``index`` actually ends a sentence.
+
+    A ``.`` between two digits is a decimal point, not a full stop. Without
+    that exception "an upper wick of at least 0.60 of its range" is three
+    sentences, and the sentence rules built on this — the qualifier window, and
+    the rule that a term match may not cross a boundary — would both cut a
+    number in half. The exception is declared in the lexicon beside the
+    terminator set, not assumed here.
+    """
+    char = norm[index]
+    if char not in stops:
+        return False
+    if char != ".":
+        return True
+    before = norm[index - 1] if index else ""
+    after = norm[index + 1] if index + 1 < len(norm) else ""
+    return not (before.isdigit() and after.isdigit())
+
+
 def _sentence_bounds(norm: str, terminators: str) -> list[tuple[int, int]]:
     """Cut ``norm`` into sentence spans on the declared terminator set.
 
@@ -371,14 +483,14 @@ def _sentence_bounds(norm: str, terminators: str) -> list[tuple[int, int]]:
     Runs of terminators and the space after them belong to the sentence they
     close, so every offset in ``norm`` falls inside exactly one span.
     """
-    stops = set(terminators)
+    stops = frozenset(terminators)
     bounds: list[tuple[int, int]] = []
     start = 0
     index = 0
     length = len(norm)
     while index < length:
-        if norm[index] in stops:
-            while index < length and norm[index] in stops:
+        if _is_terminator(norm, index, stops):
+            while index < length and _is_terminator(norm, index, stops):
                 index += 1
             while index < length and norm[index] == " ":
                 index += 1
@@ -428,6 +540,40 @@ def _slot_span(match: "re.Match[str]", start: int) -> tuple[int, int]:
     if slot_start < 0:
         return (start, start)
     return (slot_start, slot_end)
+
+
+def _ruled_spans(
+    start: int, end: int, slot: tuple[int, int]
+) -> list[tuple[int, int]]:
+    """The parts of a term match that are actually the RULED phrase.
+
+    Everything the pattern spelled out, and nothing the wildcard slot swept up.
+    This is what suppresses further scanning: a ruled phrase should not be
+    reported twice, but the words between "large" and "wick" were never ruled
+    on by anybody, and suppressing them is how "near resistance" disappeared.
+    """
+    slot_start, slot_end = slot
+    if not start <= slot_start <= slot_end <= end or slot_end == slot_start:
+        return [(start, end)]
+    spans = [span for span in ((start, slot_start), (slot_end, end)) if span[0] < span[1]]
+    return spans or [(start, end)]
+
+
+def _overlaps(spans: Sequence[tuple[int, int]], start: int, end: int) -> bool:
+    return any(start < taken_end and taken_start < end for taken_start, taken_end in spans)
+
+
+def _crosses_sentence(
+    bounds: Sequence[tuple[int, int]], start: int, end: int
+) -> bool:
+    """Whether a match runs from one sentence into the next.
+
+    A ruled term is a phrase, and a phrase does not straddle a full stop. This
+    is checked on the MATCH rather than left to each pattern's character
+    classes, so it holds for every term the lexicon declares now and every one
+    it declares later.
+    """
+    return _sentence_index(bounds, start) != _sentence_index(bounds, max(start, end - 1))
 
 
 def _anchor_words(norm: str, start: int, end: int, slot: tuple[int, int]) -> tuple[str, ...]:
@@ -596,41 +742,192 @@ def _dedupe_hits(hits: Sequence[tuple]) -> list[tuple]:
     return unique
 
 
+def _unique_item_id(candidate: str, used: set[str], fallback: str) -> str:
+    """A contract-shaped, unique ``item_id``. One rule, used by every finding.
+
+    An unresolved item is addressed by its ``item_id``, so two items sharing
+    one would make a refusal ambiguous about which thing needs resolving.
+    """
+    item_id = candidate[:64]
+    if not re.match(r"^[a-z][a-z0-9_]{2,63}$", item_id):
+        item_id = fallback
+    suffix = 2
+    unique = item_id
+    while unique in used:
+        unique = "%s_%d" % (item_id[:60], suffix)
+        suffix += 1
+    used.add(unique)
+    return unique
+
+
+def _slot_occupants(
+    norm: str,
+    text: str,
+    index_map: Sequence[int],
+    starts: Sequence[int],
+    slot: tuple[int, int],
+    lexicon: Lexicon,
+) -> list[SlotOccupant]:
+    """Unresolved language sitting inside a PARAMETERISE term's own slot.
+
+    Two kinds count, and they are the two kinds that fail closed anywhere else
+    in the source: a ruled term the lexicon REFUSES, and a discretionary marker
+    with no ruling at all.
+
+    THIS IS A DIRECT SCAN, not a filter over what the main passes accepted, and
+    the difference is the whole point. The main passes resolve overlaps: one
+    stretch of text belongs to one term. So a refusal that overlaps the ruled
+    term BOTH ways — partly in the slot, partly sharing its head noun — loses
+    that contest and vanishes, and "no wick confirmation candle" resolved at
+    exit 0 while containing PID line 117's "confirmation candle" verbatim.
+    Asking the narrower question here — is there unresolved language touching
+    this slot? — does not care who won the overlap, so a refusal cannot be
+    hidden by being adjacent to the ruled words as well as between them.
+
+    A qualifier that RE-BASES the term is not one of these. That is the
+    separate SLOT attachment form, ruled on by ``basis_qualifier_policy``, and
+    it produces its own finding.
+    """
+    slot_start, slot_end = slot
+    if slot_end <= slot_start:
+        return []
+
+    def touches(start: int, end: int) -> bool:
+        return start < slot_end and slot_start < end
+
+    refused: list[tuple[int, int, Term]] = []
+    for term in lexicon.terms:
+        if term.disposition == PARAMETERISE:
+            continue
+        for match in term.pattern.finditer(norm):
+            if match.end() > match.start() and touches(match.start(), match.end()):
+                refused.append((match.start(), match.end(), term))
+
+    occupants = [
+        SlotOccupant(
+            kind="REFUSE_TERM",
+            identity=term.term_id,
+            reason='the ruled term "%s", which the lexicon refuses' % term.label,
+            occurrence=_occurrence(text, index_map, starts, start, end),
+        )
+        for start, end, term in refused
+    ]
+    for marker in lexicon.markers:
+        for match in marker.pattern.finditer(norm):
+            start, end = match.start(), match.end()
+            if end <= start or not touches(start, end):
+                continue
+            # A marker inside a refusal already listed above is that refusal's
+            # own wording, not a second finding: "near" is why near_resistance
+            # is unresolved, and reporting both says one thing twice.
+            if any(start < taken_end and taken_start < end
+                   for taken_start, taken_end, _term in refused):
+                continue
+            occupants.append(
+                SlotOccupant(
+                    kind="DISCRETIONARY_MARKER",
+                    identity=marker.marker_id,
+                    reason=marker.reason,
+                    occurrence=_occurrence(
+                        text, index_map, starts, start, _widen(norm, end)
+                    ),
+                )
+            )
+
+    unique: list[SlotOccupant] = []
+    seen: set[tuple[str, int, int]] = set()
+    for occupant in sorted(
+        occupants, key=lambda item: (item.occurrence.start, item.kind, item.identity)
+    ):
+        key = (occupant.identity, occupant.occurrence.start, occupant.occurrence.end)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(occupant)
+    return unique
+
+
 def analyse(text: str, lexicon: Lexicon) -> Analysis:
     """Scan ``text`` against ``lexicon`` and return every finding."""
     norm, index_map = normalise(text)
     starts = _line_starts(text)
 
+    # One text, one set of sentence boundaries. ``term_match_policy`` and
+    # ``basis_qualifier_policy.window`` are checked at load time to declare the
+    # same terminator set, so the boundary a match may not cross and the
+    # boundary that bounds a window are the same boundary.
+    bounds = _sentence_bounds(norm, lexicon.sentence_terminators)
+
     # Pass 1 — ruled lexicon terms. Every match is collected first, then
     # overlaps are resolved by a fixed rule, so a longer ruled phrase always
-    # beats a shorter one that starts in the same place.
+    # beats a shorter one that starts in the same place. A match that runs from
+    # one sentence into the next is discarded before any of that: it is not a
+    # phrase, it is a wildcard slot that swallowed a full stop, and keeping it
+    # would hide everything on the far side of that stop.
     candidates: list[tuple[int, int, int, Term, "re.Match[str]"]] = []
     for order, term in enumerate(lexicon.terms):
         for match in term.pattern.finditer(norm):
-            if match.end() > match.start():
-                candidates.append((match.start(), match.end(), order, term, match))
+            if match.end() <= match.start():
+                continue
+            if _crosses_sentence(bounds, match.start(), match.end()):
+                continue
+            candidates.append((match.start(), match.end(), order, term, match))
     candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
 
-    consumed: list[tuple[int, int]] = []
-    accepted: list[tuple[int, int, Term, "re.Match[str]"]] = []
+    # ``ruled`` holds the LITERAL parts of the accepted matches only. A term's
+    # declared basis_slot is wildcard text sitting between the ruled words, so
+    # it neither belongs to the ruled phrase nor stops anything else being
+    # found there — another ruled term, or a discretionary marker.
+    ruled: list[tuple[int, int]] = []
+    accepted: list[tuple[int, int, Term, "re.Match[str]", tuple[int, int]]] = []
     for start, end, _order, term, match in candidates:
-        if any(start < taken_end and taken_start < end for taken_start, taken_end in consumed):
+        if _overlaps(ruled, start, end):
             continue
-        consumed.append((start, end))
-        accepted.append((start, end, term, match))
+        slot = _slot_span(match, start)
+        ruled.extend(_ruled_spans(start, end, slot))
+        accepted.append((start, end, term, match, slot))
+    accepted.sort(key=lambda item: item[0])
 
-    # Pass 1b — the basis-qualifier check. A PARAMETERISE ruling covers the
-    # phrase the lexicon declares and nothing else, so before a ruled term is
-    # allowed to resolve, the declared window around it is scanned for
-    # declared constructions that name a different measurement basis — and
-    # each one found is then tested for ATTACHMENT to the ruled measurement.
-    # Finding a qualifier is not enough: the window bounds the search, the
-    # declared attachment forms decide the outcome. What this does not cover
-    # is stated in the lexicon's own basis_qualifier_policy['limits'] and
-    # repeated in every emitted resolution, because a guard that overstates
-    # itself is worse than none.
+    # Pass 2 — fail closed. Any declared discretionary marker that no ruled
+    # term consumed is an unresolved item. This is the mechanism that stops an
+    # unknown term passing through silently (PID line 39), and it runs before
+    # the PARAMETERISE terms are allowed to resolve, because what it finds
+    # inside a term's slot is one of the things that stops them.
+    unknown_hits: list[tuple[int, int, Marker]] = []
+    for marker in lexicon.markers:
+        for match in marker.pattern.finditer(norm):
+            start, end = match.start(), match.end()
+            if _overlaps(ruled, start, end):
+                continue
+            unknown_hits.append((start, end, marker))
+    unknown_hits.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+
+    claimed: list[tuple[int, int]] = []
+    marker_hits: list[tuple[int, int, int, Marker]] = []
+    for start, end, marker in unknown_hits:
+        if _overlaps(claimed, start, end):
+            continue
+        widened_end = _widen(norm, end)
+        claimed.append((start, widened_end))
+        marker_hits.append((start, end, widened_end, marker))
+
+    # Pass 1b — the basis-qualifier check, and the slot check beside it. A
+    # PARAMETERISE ruling covers the phrase the lexicon declares and nothing
+    # else, so before a ruled term is allowed to resolve two questions are
+    # asked of it:
+    #
+    #   1. does the declared window hold a declared re-basing construction that
+    #      is ATTACHED to the ruled measurement? Finding a qualifier is not
+    #      enough: the window bounds the search, the declared attachment forms
+    #      decide the outcome. What this does not cover is stated in the
+    #      lexicon's own basis_qualifier_policy['limits'] and repeated in every
+    #      emitted resolution, because a guard that overstates itself is worse
+    #      than none.
+    #   2. does its own wildcard slot hold language that is itself unresolved —
+    #      a REFUSE term, or a marker with no ruling? Those words modify the
+    #      measurement, so undefined language there is undefined language about
+    #      the measurement (term_match_policy.unruled_slot_content).
     window_policy = lexicon.basis_qualifier_policy["window"]
-    bounds = _sentence_bounds(norm, str(window_policy["sentence_terminators"]))
     sentences_after = int(window_policy["sentences_after"])
 
     term_occurrences: dict[str, list[Occurrence]] = {}
@@ -640,22 +937,36 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     term_unattached: dict[str, list[tuple[int, int, BasisQualifier]]] = {}
     term_context: dict[str, tuple[int, int]] = {}
     term_window_span: dict[str, tuple[int, int]] = {}
-    for start, end, term, match in sorted(accepted, key=lambda item: item[0]):
+    slot_occupants: dict[str, list[SlotOccupant]] = {}
+    slot_texts: dict[str, list[Occurrence]] = {}
+    slot_occurrences: dict[str, list[Occurrence]] = {}
+    for start, end, term, match, slot in accepted:
         window = _window_span(bounds, start, end, sentences_after)
-        term_occurrences.setdefault(term.term_id, []).append(
-            _occurrence(text, index_map, starts, start, end)
-        )
+        occurrence = _occurrence(text, index_map, starts, start, end)
+        term_occurrences.setdefault(term.term_id, []).append(occurrence)
         term_windows.setdefault(term.term_id, []).append(
             _occurrence(text, index_map, starts, window[0], window[1])
         )
         term_by_id[term.term_id] = term
         term_hits.setdefault(term.term_id, [])
         term_unattached.setdefault(term.term_id, [])
+        slot_occupants.setdefault(term.term_id, [])
         if term.disposition != PARAMETERISE:
             # A REFUSE term already refuses; there is no ruled basis for
             # context to displace, so scanning it would only add noise.
             continue
-        slot = _slot_span(match, start)
+
+        slot_start, slot_end = slot
+        occupants = _slot_occupants(
+            norm, text, index_map, starts, slot, lexicon
+        )
+        if occupants:
+            slot_occupants[term.term_id].extend(occupants)
+            slot_texts.setdefault(term.term_id, []).append(
+                _occurrence(text, index_map, starts, slot_start, slot_end)
+            )
+            slot_occurrences.setdefault(term.term_id, []).append(occurrence)
+
         hits, unattached = _attachment(
             norm,
             lexicon,
@@ -677,9 +988,10 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         term_hits[term.term_id].extend(hits)
 
     # One term_id, one ruling. If any occurrence of a ruled term is re-based,
-    # the term does not resolve at all: its parameter would be declared once
-    # for the whole draft, so there is no coherent way to half-declare it, and
-    # the fail-closed direction is the one docs/AMBIGUITY-POLICY.md takes.
+    # or holds unresolved language in its own slot, the term does not resolve
+    # at all: its parameter would be declared once for the whole draft, so
+    # there is no coherent way to half-declare it, and the fail-closed
+    # direction is the one docs/AMBIGUITY-POLICY.md takes.
     term_findings = tuple(
         TermFinding(
             term=term_by_id[term_id],
@@ -697,11 +1009,12 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             ),
         )
         for term_id, occurrences in term_occurrences.items()
-        if not term_hits[term_id]
+        if not term_hits[term_id] and not slot_occupants[term_id]
     )
 
-    rebased_findings: list[RebasedFinding] = []
     used_item_ids: set[str] = {finding.term.term_id for finding in term_findings}
+
+    rebased_findings: list[RebasedFinding] = []
     for term_id, occurrences in term_occurrences.items():
         # A term matching twice inside one window finds the same
         # constructions twice. Report each construction once.
@@ -710,18 +1023,11 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             continue
         context_start, context_end = term_context[term_id]
         window = term_window_span[term_id]
-        item_id = ("rebased_" + term_id)[:64]
-        if not re.match(r"^[a-z][a-z0-9_]{2,63}$", item_id):
-            item_id = "rebased_term"
-        suffix = 2
-        unique = item_id
-        while unique in used_item_ids:
-            unique = "%s_%d" % (item_id[:60], suffix)
-            suffix += 1
-        used_item_ids.add(unique)
         rebased_findings.append(
             RebasedFinding(
-                item_id=unique,
+                item_id=_unique_item_id(
+                    "rebased_" + term_id, used_item_ids, "rebased_term"
+                ),
                 term=term_by_id[term_id],
                 occurrences=tuple(occurrences),
                 hits=tuple(
@@ -741,50 +1047,40 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             )
         )
 
-    # Pass 2 — fail closed. Any declared discretionary marker that no ruled
-    # term consumed is an unresolved item. This is the mechanism that stops
-    # an unknown term passing through silently (PID line 39).
-    unknown_hits: list[tuple[int, int, Marker]] = []
-    for marker in lexicon.markers:
-        for match in marker.pattern.finditer(norm):
-            start, end = match.start(), match.end()
-            if any(
-                start < taken_end and taken_start < end
-                for taken_start, taken_end in consumed
-            ):
-                continue
-            unknown_hits.append((start, end, marker))
-    unknown_hits.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    unruled_slot_findings: list[UnruledSlotFinding] = []
+    for term_id, occupants in slot_occupants.items():
+        if not occupants:
+            continue
+        unruled_slot_findings.append(
+            UnruledSlotFinding(
+                item_id=_unique_item_id(
+                    "unruled_slot_" + term_id, used_item_ids, "unruled_slot_term"
+                ),
+                term=term_by_id[term_id],
+                occurrences=tuple(slot_occurrences[term_id]),
+                slots=tuple(slot_texts[term_id]),
+                occupants=tuple(occupants),
+            )
+        )
 
-    claimed: list[tuple[int, int]] = []
     grouped: dict[tuple[str, str], list[Occurrence]] = {}
     markers_by_key: dict[tuple[str, str], Marker] = {}
-    for start, end, marker in unknown_hits:
-        if any(start < taken_end and taken_start < end for taken_start, taken_end in claimed):
-            continue
-        widened_end = _widen(norm, end)
-        claimed.append((start, widened_end))
+    for start, _end, widened_end, marker in marker_hits:
         occurrence = _occurrence(text, index_map, starts, start, widened_end)
         key = (marker.marker_id, norm[start:widened_end])
         grouped.setdefault(key, []).append(occurrence)
         markers_by_key[key] = marker
 
     unknown_findings: list[UnknownFinding] = []
-    used_ids: set[str] = set(used_item_ids)
     for key, occurrences in grouped.items():
         _marker_id, phrase = key
-        item_id = "unknown_" + (_slug(phrase, 55) or _slug(_marker_id, 55) or "term")
-        if not re.match(r"^[a-z][a-z0-9_]{2,63}$", item_id):
-            item_id = "unknown_term"
-        suffix = 2
-        unique = item_id
-        while unique in used_ids:
-            unique = "%s_%d" % (item_id[:60], suffix)
-            suffix += 1
-        used_ids.add(unique)
         unknown_findings.append(
             UnknownFinding(
-                item_id=unique,
+                item_id=_unique_item_id(
+                    "unknown_" + (_slug(phrase, 55) or _slug(_marker_id, 55) or "term"),
+                    used_item_ids,
+                    "unknown_term",
+                ),
                 marker=markers_by_key[key],
                 phrase=occurrences[0].text,
                 occurrences=tuple(occurrences),
@@ -797,4 +1093,7 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         term_findings=term_findings,
         unknown_findings=tuple(unknown_findings),
         rebased_findings=tuple(rebased_findings),
+        unruled_slot_findings=tuple(unruled_slot_findings),
+        normalised=norm,
+        ruled_spans=tuple(sorted(ruled)),
     )

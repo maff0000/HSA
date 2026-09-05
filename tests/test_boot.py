@@ -636,3 +636,71 @@ def test_boot_manifest_rationales_name_as_many_artifacts_as_they_count():
                 "%s claims %d other boot artifacts but names %d: %r"
                 % (artifact.get("path"), claimed, named, match.group(0))
             )
+
+
+# --- the acceptance record must describe the suite it actually has ------------
+
+
+def _collected_counts() -> tuple[int, dict[str, int]]:
+    """Per-file and total test counts, from a real pytest collection.
+
+    Collection only — nothing is executed, so this cannot recurse.
+    """
+    import collections
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q",
+         "-p", "no:cacheprovider"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert completed.returncode == 0, completed.stdout[-2000:] + completed.stderr[-2000:]
+    counts: dict[str, int] = collections.Counter()
+    for line in completed.stdout.splitlines():
+        if "::" in line:
+            counts[line.split("::")[0].replace("\\", "/")] += 1
+    assert counts, "collected nothing; the counting rule has drifted"
+    return sum(counts.values()), dict(counts)
+
+
+def test_the_acceptance_record_reports_the_suite_it_actually_has():
+    """``docs/ACCEPTANCE.md`` is an evidence record, so its numbers are claims.
+
+    It said "772 passed" against a suite of 803, and five of its ten per-file
+    counts were stale — ``tests/test_ambiguity.py`` listed at 38 against 59.
+    Nothing failed, because nothing was checking.
+
+    PINNING THE TOTAL WAS A JUDGEMENT CALL, and this is the reasoning. It does
+    invite churn: every test added anywhere edits one line of a document. The
+    alternative is worse. The numbers are not decoration — they are how a
+    reader weighs the evidence behind each acceptance criterion, and a count
+    that overstates the evidence is a false claim in the one document whose
+    entire job is to be true. The churn is one line and this test says exactly
+    which line; a stale record costs an audit cycle. The same discipline
+    already applies to ``docs/BOOT.md``'s sample output, which is asserted
+    against a live run.
+    """
+    import re
+
+    total, per_file = _collected_counts()
+    text = (REPO_ROOT / "docs" / "ACCEPTANCE.md").read_text(encoding="utf-8")
+
+    claimed_total = re.search(r"Full suite: \*\*(\d+) passed\*\*", text)
+    assert claimed_total, "ACCEPTANCE.md no longer states a suite total"
+    assert int(claimed_total.group(1)) == total, (
+        "docs/ACCEPTANCE.md says %s passed; the suite collects %d"
+        % (claimed_total.group(1), total)
+    )
+
+    cited = re.findall(r"`(tests/test_[a-z0-9_]+\.py)` \((\d+)\)", text)
+    assert cited, "ACCEPTANCE.md no longer cites any per-file test count"
+    for path, count in cited:
+        assert path in per_file, "ACCEPTANCE.md cites %s, which collects nothing" % path
+        assert int(count) == per_file[path], (
+            "docs/ACCEPTANCE.md says %s has %s tests; it collects %d"
+            % (path, count, per_file[path])
+        )

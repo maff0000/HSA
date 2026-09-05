@@ -16,6 +16,33 @@
       "responsible": "MATT"
     }
   },
+  "term_match_policy": {
+    "description": "Test fixture. Same shape as the shipped term_match_policy, with the slot ruling ADVISORY rather than BLOCKING so the advisory path is exercised end to end.",
+    "sentence_boundary": {
+      "rule": "SENTENCE",
+      "sentence_terminators": ".!?;",
+      "decimal_exception": "A '.' between two digits is a decimal point, not a terminator.",
+      "why": "A term match may not span a sentence boundary. Test fixture."
+    },
+    "slot_is_not_ruled_text": {
+      "rule": "Only the literal parts of a term match suppress further scanning; the declared basis_slot does not.",
+      "why": "Test fixture: the slot is wildcard text and is scanned like ordinary prose."
+    },
+    "unruled_slot_content": {
+      "disposition": "REFUSE",
+      "severity": "ADVISORY",
+      "blocks": [
+        "PARAMETER_DEFINITION"
+      ],
+      "precedence": "Test fixture: a PARAMETERISE term whose slot holds unresolved language does not resolve.",
+      "why_unresolved_template": "Test fixture: \"{term_label}\" carries \"{slot_text}\" in its modifier slot, and that is unresolved: {findings}.",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description_template": "Test fixture: resolve the language inside \"{phrase}\" ({findings}).",
+        "responsible": "MATT"
+      }
+    }
+  },
   "basis_qualifier_policy": {
     "disposition": "REFUSE",
     "severity": "ADVISORY",
@@ -74,7 +101,7 @@
           "pattern": "\\b{anchor}\\b[^.;!?]{0,20}?\\b(?:defined|define|measured|measure|judged|assessed)\\s+as\\b"
         }
       ],
-      "not_attached": "Deliberately NOT treated as re-basing, because each attaches to something other than the ruled measurement: a stop or target sized in ATR (\"a large wick. My stop is 2 ATR below entry.\"); a bar-count expiry or persistence window, which PID line 136 REQUIRES a package to state (\"the setup expires within 3 bars\", \"expires after 4 bars\"); a trend or location filter naming an average (\"a large wick above the 200 period moving average\"); a reference to prior bars used as a price level rather than a yardstick (\"a large wick that clears the previous bars' high\"). These resolve, and source_basis_agreement stays NOT_VERIFIED."
+      "not_attached": "Deliberately NOT treated as re-basing, because each attaches to something other than the ruled measurement: a stop or target sized in ATR (\"a large wick. My stop is 2 ATR below entry.\"); a bar-count expiry or persistence window, which PID line 137 REQUIRES a package to state (\"the setup expires within 3 bars\", \"expires after 4 bars\"); a trend or location filter naming an average (\"a large wick above the 200 period moving average\"); a reference to prior bars used as a price level rather than a yardstick (\"a large wick that clears the previous bars' high\"). These resolve, and source_basis_agreement stays NOT_VERIFIED."
     }
   },
   "basis_qualifiers": [
