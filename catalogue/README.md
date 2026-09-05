@@ -196,10 +196,14 @@ across versions.
 6. Run `python3 -m pytest tests/test_catalogue.py` and
    `hsa validate catalogue/atomic/<strategy_id>.json`.
 
-An atomic strategy may **not** reference another strategy. There is no
-property in the schema through which it could, and it must not acquire one by
-consuming another strategy's output through a HERMES field. See
-`docs/COMPOSITION-DOCTRINE.md` §1.
+An atomic strategy may **not** reference another strategy. The schema declares
+no property through which it could, but the schema is not what enforces this:
+the open objects inside `deterministic_test_cases` accept a planted peer
+`strategy_id` at exit 0. The enforcement is
+`tests/test_catalogue.py::test_entry_references_no_other_strategy`, which
+walks every node of the entry — so run it, not just `hsa validate`. An entry
+must also not acquire a reference by consuming another strategy's output
+through a HERMES field. See `docs/COMPOSITION-DOCTRINE.md` §1.
 
 ---
 

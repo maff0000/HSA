@@ -40,10 +40,14 @@ So composition is a **separate model applied from the outside** (PID line 61).
 A chain reads normalised atomic outputs and combines them. The atomics never
 learn that a chain exists.
 
-The prohibition is structural, not advisory: `atomic_strategy.schema.json`
-provides no property through which another strategy could be named and sets
-`additionalProperties: false`, so a document that invents one fails
-validation. See `contracts/README.md`.
+The prohibition is enforced, but not where you would expect.
+`atomic_strategy.schema.json` provides no property through which another
+strategy could be named and sets `additionalProperties: false`, so a document
+that invents a top-level property fails validation. It does not close the
+whole door: the open objects inside `deterministic_test_cases` accept a
+planted peer `strategy_id` and validate clean. The complete check is
+`tests/test_catalogue.py::test_entry_references_no_other_strategy`, a walk
+over every node of every entry. See `contracts/README.md`.
 
 **The line this puts on catalogue authoring.** An atomic strategy may consume
 any market fact HERMES publishes, including structural ones. It may not

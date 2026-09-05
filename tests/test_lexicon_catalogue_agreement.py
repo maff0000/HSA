@@ -41,7 +41,7 @@ from pathlib import Path
 import pytest
 
 from hsa.intake import load_lexicon
-from hsa.intake.lexicon import PARAMETERISE, REFUSE
+from hsa.intake.lexicon import PARAMETERISE, REFUSE, LexiconError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CATALOGUE_DIR = REPO_ROOT / "catalogue" / "atomic"
@@ -223,57 +223,61 @@ def _realisation_claims(entry: dict) -> list[str]:
     return [key for key in _REALISATION_KEYS if key in entry]
 
 
-def test_a_refused_term_claims_no_realisation(lexicon):
+def test_a_refused_term_claims_no_realisation():
     """A refusal has no measurement basis, so it can have no realisation.
 
-    Asserted against the lexicon FILE, not against the loaded object. The
-    loaded object was the whole of this test before, and it proved nothing:
-    ``Term.realised_by`` defaults to ``()`` and ``hermes_basis_relationship``
-    to ``None``, and the loader's REFUSE branch never assigns either, so both
-    assertions restated a dataclass default. A REFUSE entry declaring
-    ``realised_by`` in the JSON would have loaded, been silently dropped, and
-    passed here — while the module docstring claims this module fails when "a
-    REFUSE term claims a realisation it was refused".
+    Read off the lexicon FILE, and deliberately WITHOUT the ``lexicon``
+    fixture. Two independent reasons, and the second one was missed once:
 
-    The declaration is what a reviewer reads, so the declaration is what is
-    checked. The loaded-object assertions are kept underneath, because between
-    them the two say the file does not claim a realisation AND the loader did
-    not invent one.
+    * The loaded object cannot answer the question. ``Term.realised_by``
+      defaults to ``()`` and ``hermes_basis_relationship`` to ``None``, and
+      the loader's REFUSE branch assigns neither, so asserting on the Term
+      restates a dataclass default rather than checking the declaration.
+    * Taking the fixture put the answer out of this test's reach anyway.
+      ``load_lexicon()`` REFUSES the violation — the REFUSE branch of
+      ``_load_term`` in ``hsa/intake/lexicon.py`` raises on either key — so
+      planting one made fixture setup raise: this module reported 18 ERRORs
+      and this test, the one named for the rule, never ran its body. That was
+      measured, not assumed. R8 removed exactly this coupling from
+      ``test_parameterised_terms_declare_a_basis_and_bounded_parameters`` in
+      ``tests/test_ambiguity.py`` and left this one in place.
+
+    So the guard and this test used to mask each other: the guard was the only
+    thing enforcing the rule, and had no test that could fail; this test was
+    named for the rule and could only ever error. Against the file it now
+    fails, here, naming the term and what it claimed.
+    ``test_the_loader_also_refuses_a_declared_realisation`` covers the guard.
     """
-    by_id = {
-        entry["term_id"]: entry
-        for entry in _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")["terms"]
-    }
+    declared = _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")["terms"]
     checked = 0
-    for term in lexicon.terms:
-        if term.disposition != REFUSE:
+    for entry in declared:
+        if entry.get("disposition") != REFUSE:
             continue
-        assert not _realisation_claims(by_id[term.term_id]), (
+        assert not _realisation_claims(entry), (
             "%s is REFUSE but declares %s. A refusal has no ratified "
             "measurement basis, so there is nothing for a catalogue entry to "
-            "implement"
-            % (term.term_id, ", ".join(_realisation_claims(by_id[term.term_id])))
+            "implement" % (entry["term_id"], ", ".join(_realisation_claims(entry)))
         )
-        assert term.realised_by == ()
-        assert term.hermes_basis_relationship is None
         checked += 1
     assert checked, "no REFUSE term in the lexicon; this test asserted nothing"
 
 
-def test_that_refusal_check_would_see_a_declared_realisation(lexicon):
+def test_that_refusal_check_would_see_a_declared_realisation():
     """Non-vacuity: plant the thing the test above forbids, and see it caught.
 
-    Asserted on the PREDICATE, and on the loader beside it, because the two
-    together are the reason the file is the thing checked: a REFUSE entry that
-    declares a realisation loads without complaint and the loaded Term shows no
-    trace of it. Whatever the file claims, the object cannot tell you.
+    Asserted on the PREDICATE, over the file, with no ``lexicon`` fixture —
+    for the same reason the test above drops it. An earlier version of this
+    docstring said a planted REFUSE realisation "loads without complaint and
+    the loaded Term shows no trace of it". The first half was never true: the
+    loader has refused it since R3. What IS true is that the Term is a
+    useless witness either way, because the loader's REFUSE branch assigns
+    neither field, so a Term can only ever show the dataclass defaults. That
+    is why the declaration is the thing checked.
     """
-    refused_ids = {
-        term.term_id for term in lexicon.terms if term.disposition == REFUSE
-    }
-    assert refused_ids, "no REFUSE term to plant against"
     declared = _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")["terms"]
-    entry = next(item for item in declared if item["term_id"] in refused_ids)
+    entry = next(
+        item for item in declared if item.get("disposition") == REFUSE
+    )
 
     assert _realisation_claims(entry) == []
     planted = copy.deepcopy(entry)
@@ -286,11 +290,48 @@ def test_that_refusal_check_would_see_a_declared_realisation(lexicon):
         "hermes_basis_relationship",
     ]
 
-    # And the loaded object still shows nothing, which is why the assertion
-    # above is made on the declaration and not on the Term.
-    term = lexicon.term(entry["term_id"])
-    assert term.realised_by == ()
-    assert term.hermes_basis_relationship is None
+
+@pytest.mark.parametrize("key", _REALISATION_KEYS)
+def test_the_loader_also_refuses_a_declared_realisation(tmp_path, key):
+    """The guard in ``hsa/intake/lexicon.py`` had no test that could fail.
+
+    It is real and it works in shipped code, but the only test named for the
+    rule took the ``lexicon`` fixture, so a planted violation raised during
+    fixture setup and errored the module instead of failing the test. The
+    guard was therefore enforcing an invariant nothing independently
+    exercised. This runs the loader against a planted file on disk and
+    requires it to refuse, per key, naming the key it refused.
+
+    Written on a tmp_path copy: the shipped lexicon is never mutated, and
+    ``load_lexicon(path)`` is the same entry point ``$HSA_INTAKE_LEXICON``
+    reaches, so this is the real load path and not a re-implementation.
+    """
+    document = _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")
+    entry = next(
+        item for item in document["terms"] if item.get("disposition") == REFUSE
+    )
+    # Start from a term that claims nothing, so the refusal below is provably
+    # a refusal of ``key`` and not of some other claim already on the entry.
+    for other in _REALISATION_KEYS:
+        entry.pop(other, None)
+    entry[key] = (
+        [{"catalogue_strategy_id": "wick_rejection", "lexicon_parameter": "invented"}]
+        if key == "realised_by"
+        else {"invented": True}
+    )
+    planted = tmp_path / "lexicon.json"
+    planted.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+    # The planted file really does declare it, so a refusal below is a
+    # refusal of this, and not of some unrelated malformation.
+    assert _realisation_claims(_load(planted)["terms"][
+        document["terms"].index(entry)
+    ]) == [key]
+
+    with pytest.raises(LexiconError) as raised:
+        load_lexicon(planted)
+    assert key in str(raised.value), str(raised.value)
+    assert entry["term_id"] in str(raised.value), str(raised.value)
 
 
 # --- the link resolves, and the two sides agree ------------------------------

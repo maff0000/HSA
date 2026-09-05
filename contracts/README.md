@@ -52,17 +52,33 @@ from hsa.contracts import KINDS, load_schema, detect_kind, validate_document
 kind = validate_document(document)          # raises DocumentInvalidError
 ```
 
-## Two prohibitions that are structural, not advisory
+## Two prohibitions, and where each is really enforced
 
-Both are enforced by the shape of the schema, so a document that breaks them
-fails validation rather than relying on anyone remembering the rule.
+One of the two is enforced by the shape of the schema. The other is not, and
+is enforced by a test instead. The distinction matters: a reader who believes
+the schema rejects both will trust `hsa validate` to catch something it does
+not catch.
 
-**An atomic strategy cannot reference another strategy.** PID lines 52 and
-59 say atomic strategies are unaware of other strategies and never call or
-import them. `atomic_strategy.schema.json` therefore provides no property
-through which a peer could be named — no `depends_on`, no `components`, no
-`inputs` — and sets `additionalProperties: false`, so inventing one is
-rejected. The only `strategy_id` in an atomic document is its own identity.
+**An atomic strategy cannot reference another strategy — enforced by a test,
+not by the schema.** PID lines 52 and 59 say atomic strategies are unaware of
+other strategies and never call or import them. `atomic_strategy.schema.json`
+provides no property through which a peer could be named — no `depends_on`,
+no `components`, no `inputs` — and sets `additionalProperties: false`, so
+inventing a top-level property is rejected. That is real, but it is not the
+whole prohibition. Each `deterministic_test_cases` item carries three
+deliberately open objects — `given_hermes_facts`, `given_parameters` and
+`expected_output`, all declared `{"type": "object"}` with no constraint on
+their keys — and a peer `strategy_id` planted inside any of the three
+validates clean: `validate_document()` returns `atomic_strategy` and
+`hsa validate --structural-only` exits 0.
+
+What actually enforces the prohibition is
+`tests/test_catalogue.py::test_entry_references_no_other_strategy`, which
+walks every node of every catalogue entry and fails on any `strategy_id`
+that is not the entry's own. The walk is complete by construction — it does
+not care which key the reference hides under — and it is itself checked for
+non-vacuity by planting a reference and requiring the walk to find it. The
+packages embed catalogue entries verbatim, so that walk covers what ships.
 Composition happens exclusively in a chain, from the outside.
 
 **A chain cannot contain another chain.** PID line 82 says prefer atomic
