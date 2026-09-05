@@ -329,28 +329,53 @@ hatch — and not something to route around in a document.
 
 ## 8. Where the rules are enforced
 
-| Rule | Enforced by |
-| --- | --- |
-| Only the four canonical primitives | `chain.schema.json` (closed enum) |
-| Inputs are atomic references only; no nesting | `chain.schema.json` (no node `$def`, no self-`$ref`) |
-| Identity is id + version, both required | `chain.schema.json` |
-| Reason on match and non-match, per input | `chain.schema.json` (`const: true`) |
-| `SEQUENCE` has a window and per-input indices | `chain.schema.json` (conditional) |
-| `CONTEXT_TRIGGER` has *at least* one CONTEXT and one TRIGGER | `chain.schema.json` (conditional) |
-| `CONTEXT_TRIGGER` has *at most* one of each, and no other role | `hsa/semantics.py` |
-| `input_id` unique within a chain | `hsa/semantics.py` |
-| `sequence_index` contiguous from 1, no duplicates | `hsa/semantics.py` |
-| Whether that order is the *correct* order | **nothing** — see section 3, "The limit on ordering" |
-| `sequence_index` absent on a non-`SEQUENCE` chain | `hsa/semantics.py` |
-| Every `input_id` attributed in `reason_fields` | `hsa/semantics.py` |
-| Every `reason_fields` entry names a real emitted field | `hsa/semantics.py` |
-| An optional input is never the sole cause of a match | `hsa/semantics.py` |
-| CONTEXT timeframe strictly above TRIGGER | `hsa/semantics.py` |
-| Input timeframe agrees with the role model | `hsa/semantics.py` |
-| Every referenced atomic resolves in the catalogue | `hsa/semantics.py` |
-| Package and embedded chain agree | `hsa/semantics.py` |
-| Package embeds every atomic its chain names | `hsa/semantics.py` |
-| Atomic HERMES needs carried up to package level | `hsa/semantics.py` |
+The **Scope** column says what document the rule actually runs against, because
+that is not something a reader should have to infer from a row's position. It
+was inferable and it was wrong: *"Every `reason_fields` entry names a real
+emitted field"* sat among the chain rows and reads as a chain rule, but the
+check is `_check_reason_fields_bound` and it runs only from `check_package`. A
+standalone chain declaring `reason_fields: ["htf_context.totally_bogus"]`
+validated at exit 0. The scope is stated on every row now rather than fixed on
+the one row that was caught, and `tests/test_semantics.py` pins the two
+`reason_fields` rows against what the code does.
+
+| Rule | Scope | Enforced by |
+| --- | --- | --- |
+| Only the four canonical primitives | chain | `chain.schema.json` (closed enum) |
+| Inputs are atomic references only; no nesting | chain | `chain.schema.json` (no node `$def`, no self-`$ref`) |
+| Identity is id + version, both required | chain | `chain.schema.json` |
+| Reason on match and non-match, per input | chain | `chain.schema.json` (`const: true`) |
+| `SEQUENCE` has a window and per-input indices | chain | `chain.schema.json` (conditional) |
+| `CONTEXT_TRIGGER` has *at least* one CONTEXT and one TRIGGER | chain | `chain.schema.json` (conditional) |
+| `CONTEXT_TRIGGER` has *at most* one of each, and no other role | chain | `hsa/semantics.py` |
+| `input_id` unique within a chain | chain | `hsa/semantics.py` |
+| `sequence_index` contiguous from 1, no duplicates | chain | `hsa/semantics.py` |
+| Whether that order is the *correct* order | — | **nothing** — see section 3, "The limit on ordering" |
+| `sequence_index` absent on a non-`SEQUENCE` chain | chain | `hsa/semantics.py` |
+| Every `input_id` attributed in `reason_fields` | chain | `hsa/semantics.py` |
+| Every `reason_fields` entry names a real emitted field | **package** | `hsa/semantics.py` |
+| An optional input is never the sole cause of a match | chain | `hsa/semantics.py` |
+| CONTEXT timeframe strictly above TRIGGER | chain | `hsa/semantics.py` |
+| Input timeframe agrees with the role model | chain | `hsa/semantics.py` |
+| Every referenced atomic resolves in the catalogue | chain, with a catalogue | `hsa/semantics.py` |
+| Package and embedded chain agree | package | `hsa/semantics.py` |
+| Package embeds every atomic its chain names | package | `hsa/semantics.py` |
+| Atomic HERMES needs carried up to package level | package | `hsa/semantics.py` |
+
+### Why that one rule is package-scoped and stays that way
+
+It could not be moved without weakening it. An entry binds either as
+`<input_id>.<field>`, which needs the field list of the atomic behind that
+input, or as a bare name declared in the **package's** `output_contract.fields`
+— and a standalone chain document has neither. It references its atomics rather
+than embedding them, and it has no package output contract at all. Running the
+check at chain scope would mean checking the half that a catalogue can resolve
+and silently skipping the other half, which is a row that overstates itself
+again in a new way.
+
+What a standalone chain does get is the row above it: every `input_id` must be
+attributed in `reason_fields`. That is the part decidable from the chain alone,
+and it runs there.
 
 Note the first two `CONTEXT_TRIGGER` rows. "Exactly one CONTEXT and exactly one
 TRIGGER" is enforced by the two layers jointly: the schema's `contains` requires

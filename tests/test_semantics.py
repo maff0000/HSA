@@ -540,6 +540,53 @@ def test_an_unembedded_input_is_not_reported_twice(package_doc, catalogue):
     assert "package.chain_inputs_embedded" in _checks(findings)
 
 
+def test_the_doctrine_table_states_the_scope_this_check_actually_has(
+    package_doc, catalogue
+):
+    """`docs/COMPOSITION-DOCTRINE.md` section 8 must not overstate its reach.
+
+    The row said `hsa/semantics.py` and sat among the chain rows, so it read as
+    a chain rule. It is not one: ``_check_reason_fields_bound`` compares
+    ``reason_fields`` against the embedded atomics' emitted fields and the
+    PACKAGE's ``output_contract``, and a standalone chain has neither. A chain
+    declaring a field nothing emits therefore validated at exit 0 while the
+    doctrine said otherwise.
+
+    Both halves are pinned here — what the code does, and what the document
+    claims it does — because a scope stated in prose beside a check that does
+    something else is how this drifted in the first place.
+    """
+    chain = copy.deepcopy(package_doc["chain"])
+    contract = chain["explanation_contract"]
+    contract["reason_fields"] = [
+        contract["reason_fields"][0].split(".", 1)[0] + ".totally_bogus"
+    ] + contract["reason_fields"][1:]
+
+    # What the code does: the chain scope cannot see it; the package scope can.
+    assert "package.reason_fields_bound" not in _checks(
+        check_chain(chain, catalogue=catalogue)
+    )
+    package_doc["chain"] = chain
+    assert "package.reason_fields_bound" in _checks(
+        check_package(package_doc, catalogue=catalogue)
+    )
+
+    # What the document claims. The row carries an explicit scope now, and the
+    # rule decidable from a chain alone is the row above it.
+    doctrine = (REPO_ROOT / "docs" / "COMPOSITION-DOCTRINE.md").read_text(
+        encoding="utf-8"
+    )
+    rows = {
+        line.split("|")[1].strip(): line.split("|")[2].strip()
+        for line in doctrine.splitlines()
+        if line.startswith("|") and line.count("|") >= 4
+    }
+    bound = "Every `reason_fields` entry names a real emitted field"
+    attributed = "Every `input_id` attributed in `reason_fields`"
+    assert rows.get(bound) == "**package**", rows.get(bound)
+    assert rows.get(attributed) == "chain", rows.get(attributed)
+
+
 # --- package.chain_agreement -------------------------------------------------
 
 

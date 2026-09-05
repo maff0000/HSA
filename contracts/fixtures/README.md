@@ -62,7 +62,7 @@ all four `supports` values.
 | --- | --- | --- | --- |
 | `source_analysis.json` | `SOURCE_ANALYSIS` | `INFORMATIONAL` | Analysis of the raw source behind a strategy: which claims were measurable, which were discretionary language. |
 | `strategy_hypothesis.json` | `STRATEGY_HYPOTHESIS` | `INFORMATIONAL` | The economic claim a strategy stakes. Stated, not shown. |
-| `research_finding_run.json` | `RESEARCH_FINDING` | `INFORMATIONAL` | The shape of a finding from a run — the one fixture carrying the full identity chain `experiment_id` → `run_id` → `evidence_id` → `artifact_id`. No run has been executed. |
+| `research_finding_run.json` | `RESEARCH_FINDING` | `INFORMATIONAL` | The shape of a finding from a run. Carries the full identity chain `experiment_id` → `run_id` → `evidence_id` → `artifact_id`, as do the three evidence fixtures below it; the four `INFORMATIONAL` fixtures that state a claim rather than report a run carry only `experiment_id` and `artifact_id`. No run has been executed. |
 | `promotion_evidence.json` | `PROMOTION_EVIDENCE` | `PROMOTION` | The shape of evidence offered in support of promoting `gold_context_breakout` 1.0.0. No gate has been evaluated; 1.0.0 is a `CANDIDATE`. |
 | `version_lineage_original.json` | `VERSION_LINEAGE` | `INFORMATIONAL` | Lineage anchor for the original version, 1.0.0, which supersedes nothing. A lineage anchor says nothing about lifecycle status. |
 | `version_lineage_candidate.json` | `VERSION_LINEAGE` | `INFORMATIONAL` | The shape of a lineage anchor for a candidate 1.1.0 superseding 1.0.0. No 1.1.0 exists in `strategies/`. |

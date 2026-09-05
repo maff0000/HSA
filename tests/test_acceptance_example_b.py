@@ -832,7 +832,7 @@ def test_criterion_10_identity_is_id_and_version_everywhere(package, evidence):
 
 
 def test_criterion_10_a_candidate_supersedes_nothing_and_mutates_nothing(package):
-    """PID lines 260, 262 and 185-189.
+    """PID lines 259, 262 and 185-189.
 
     This is the original version, so ``supersedes`` is null — stated
     explicitly rather than omitted, because an absent field cannot be told
@@ -879,7 +879,7 @@ def test_criterion_10_every_timestamp_is_utc(package, evidence):
 
 
 def test_criterion_11_the_package_has_end_to_end_deterministic_cases(package):
-    """PID line 261. Over and above each atomic's own cases."""
+    """PID line 260. Over and above each atomic's own cases."""
     cases = package["deterministic_test_cases"]
     assert len(cases) >= 4
     assert len({case["case_id"] for case in cases}) == len(cases)

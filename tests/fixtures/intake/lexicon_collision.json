@@ -1,12 +1,13 @@
 {
-  "lexicon_version": "0.0.1-test",
+  "lexicon_version": "0.0.2-collision-test",
   "ruling_document": "docs/AMBIGUITY-POLICY.md",
   "ratified_by": "TEST_FIXTURE_ONLY",
-  "description": "Test-only lexicon. Identical in shape to the shipped lexicon, but every refusal is ADVISORY rather than BLOCKING, which exercises the path where unresolved language travels WITH a draft instead of stopping it. Not a ruling on any term; see docs/AMBIGUITY-POLICY.md for the real rulings.",
+  "description": "Test-only lexicon, deliberately NOT tightened. Its PARAMETERISE term lists \"closes?\" among its literal head nouns and its REFUSE term begins with \"close to\", so the two patterns claim the same word on purpose. This is the lexicon a careless author writes, and the point of the fixture is that the guarantee in docs/AMBIGUITY-POLICY.md survives it: the invariant is enforced on the MATCH in hsa/intake/analyser.py, not by any pattern being written carefully. Not a ruling on any term.",
   "unknown_term_policy": {
     "disposition": "REFUSE",
-    "severity": "ADVISORY",
+    "severity": "BLOCKING",
     "blocks": [
+      "ATOMIC_DECOMPOSITION",
       "PARAMETER_DEFINITION"
     ],
     "why_unresolved_template": "Test fixture: \"{phrase}\" is discretionary ({marker_reason}) and undeclared.",
@@ -17,7 +18,7 @@
     }
   },
   "term_match_policy": {
-    "description": "Test fixture. Same shape as the shipped term_match_policy, with the slot and overlap rulings ADVISORY rather than BLOCKING so the advisory path is exercised end to end.",
+    "description": "Test fixture. Same shape as the shipped term_match_policy, BLOCKING, over patterns that collide on purpose.",
     "sentence_boundary": {
       "rule": "SENTENCE",
       "sentence_terminators": ".!?;",
@@ -31,8 +32,9 @@
     "overlap_resolution": {
       "rule": "Test fixture: overlap resolution decides which term parameterises, never that the loser was not said. A match is dropped only when the accepted rulings cover it end to end, and a PARAMETERISE term whose match overlaps a REFUSE term or an unruled marker does not resolve.",
       "disposition": "REFUSE",
-      "severity": "ADVISORY",
+      "severity": "BLOCKING",
       "blocks": [
+        "ATOMIC_DECOMPOSITION",
         "PARAMETER_DEFINITION"
       ],
       "precedence": "Test fixture: REFUSE wins the collision outright.",
@@ -46,8 +48,9 @@
     },
     "unruled_slot_content": {
       "disposition": "REFUSE",
-      "severity": "ADVISORY",
+      "severity": "BLOCKING",
       "blocks": [
+        "ATOMIC_DECOMPOSITION",
         "PARAMETER_DEFINITION"
       ],
       "precedence": "Test fixture: a PARAMETERISE term whose slot holds unresolved language does not resolve.",
@@ -61,8 +64,9 @@
   },
   "basis_qualifier_policy": {
     "disposition": "REFUSE",
-    "severity": "ADVISORY",
+    "severity": "BLOCKING",
     "blocks": [
+      "ATOMIC_DECOMPOSITION",
       "PARAMETER_DEFINITION"
     ],
     "window": {
@@ -141,7 +145,7 @@
       "label": "large wick",
       "disposition": "PARAMETERISE",
       "pid_reference": "PID line 114",
-      "pattern": "\\b(?:large|big)(?P<basis_slot>(?:[ -][a-z0-9.%]+){0,3})[ -]wicks?\\b",
+      "pattern": "\\b(?:large|big)(?P<basis_slot>(?:[ -][a-z0-9.%]+){0,3})[ -](?:wicks?|closes?)\\b",
       "measurement_basis": "Wick length as a fraction of the evaluated candle's total range.",
       "basis_rationale": "Test fixture mirroring the shipped ruling.",
       "parameters": [
@@ -184,13 +188,14 @@
       "label": "near resistance",
       "disposition": "REFUSE",
       "pid_reference": "PID line 115",
-      "pattern": "\\bnear[ -](?:the[ -])?resistance\\b",
+      "pattern": "\\b(?:near|close to)[ -](?:the[ -])?resistance\\b",
       "measurement_basis": null,
       "why_unresolved": "Test fixture: the resistance level is never constructed.",
       "blocks": [
-        "ATOMIC_DECOMPOSITION"
+        "ATOMIC_DECOMPOSITION",
+        "PARAMETER_DEFINITION"
       ],
-      "severity": "ADVISORY",
+      "severity": "BLOCKING",
       "resolution_needed": {
         "kind": "HUMAN_DECISION",
         "description": "Test fixture: decide how resistance is constructed.",

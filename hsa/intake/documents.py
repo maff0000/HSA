@@ -38,6 +38,7 @@ from jsonschema import Draft202012Validator
 from hsa.contracts import contracts_dir, validate_document
 from hsa.intake.analyser import (
     Analysis,
+    ContestedMatchFinding,
     RebasedFinding,
     TermFinding,
     UnknownFinding,
@@ -306,6 +307,42 @@ def _unresolved_from_unruled_slot(
     }
 
 
+def _unresolved_from_contested(
+    finding: ContestedMatchFinding, analysis: Analysis
+) -> dict:
+    """A ruled term whose own ruled phrase collides with a refusal.
+
+    ``source_language`` quotes the collision — term match and occupant
+    together — because either half on its own reads as an ordinary finding and
+    hides the fact that two rulings are claiming one stretch of text. That
+    collision is the thing the source has to resolve.
+    """
+    policy = analysis.lexicon.overlap_policy
+    term = finding.term
+    resolution = policy["resolution_needed"]
+    fields = {
+        "phrase": " ".join(finding.occurrences[0].text.split()),
+        "term_label": term.label,
+        "term_id": term.term_id,
+        "measurement_basis": term.measurement_basis or "",
+        "context_text": finding.context_text,
+        "findings": finding.occupant_summary,
+    }
+    return {
+        "item_id": finding.item_id,
+        "source_language": finding.contexts[0].text,
+        "location": finding.location,
+        "why_unresolved": policy["why_unresolved_template"].format(**fields),
+        "blocks": list(policy["blocks"]),
+        "severity": policy["severity"],
+        "resolution_needed": {
+            "kind": resolution["kind"],
+            "description": resolution["description_template"].format(**fields),
+            "responsible": resolution["responsible"],
+        },
+    }
+
+
 def _unresolved_from_term(finding: TermFinding) -> dict:
     term = finding.term
     item: dict[str, Any] = {
@@ -350,8 +387,9 @@ def unresolved_items(analysis: Analysis) -> list[dict]:
     """Every unresolved item, in one fixed order.
 
     Ruled refusals, then re-based terms, then terms whose wildcard slot holds
-    unresolved language, then unknowns. Order is fixed so two runs over the
-    same source produce byte-identical documents apart from the timestamp.
+    unresolved language, then terms whose ruled phrase collides with one, then
+    unknowns. Order is fixed so two runs over the same source produce
+    byte-identical documents apart from the timestamp.
     """
     items = [_unresolved_from_term(finding) for finding in analysis.refused]
     items.extend(
@@ -361,6 +399,10 @@ def unresolved_items(analysis: Analysis) -> list[dict]:
     items.extend(
         _unresolved_from_unruled_slot(finding, analysis)
         for finding in analysis.unruled_slot_findings
+    )
+    items.extend(
+        _unresolved_from_contested(finding, analysis)
+        for finding in analysis.contested_findings
     )
     items.extend(
         _unresolved_from_unknown(finding, analysis)

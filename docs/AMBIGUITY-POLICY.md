@@ -319,7 +319,87 @@ four patterns that exist today and nothing else. Instead:
   lost that contest and vanished anyway: `"no wick confirmation candle"`
   resolved at exit 0 while containing PID line 117's *"confirmation candle"*
   verbatim. Asking the narrower question — *is there unresolved language
-  touching this slot?* — does not care who won the overlap.
+  touching this match?* — does not care who won the overlap.
+
+## Overlap resolution never deletes a refusal
+
+The section above scoped its fix to the **wildcard slot**, because the slot was
+where the defect had been found. A fourth audit found the fifth phrasing, and
+it does not use the slot at all:
+
+```
+"XAUUSD 15m. I enter on a no-wick close to resistance."
+  -> exit 0, resolved "no-wick close", nothing unresolved
+
+  control: "XAUUSD 15m. I enter close to resistance."  -> exit 4, near_resistance
+  control: "XAUUSD 15m. I enter near resistance."      -> exit 4, near_resistance
+```
+
+`no_wick_candle` lists `closes?` among its **literal head nouns**. It claims
+the word *"close"*, which is also where `near_resistance` starts. The analyser
+collects every match and then resolves overlaps by a fixed rule — leftmost,
+then longest, then lexicon order — and the loser was discarded. So
+`near_resistance`, a **PID line 115** must-not-guess phrase, lost a sorting
+contest and left no trace: no refusal, no advisory, no mention. The controls
+show it fires perfectly well on its own. It was deleted, not missed.
+
+That is the same silent path as the slot bug and as the two before it. Three
+repairs each fixed the phrasing in front of them; this one states the rule they
+were all instances of:
+
+> **Overlap resolution may decide which term *resolves*. It may never cause a
+> recognised REFUSE term or a declared marker to go unreported.**
+
+Two consequences, both enforced on the match in `hsa/intake/analyser.py` and
+both declared in `term_match_policy.overlap_resolution`:
+
+1. **Suppression requires coverage, not overlap.** A match is treated as
+   "already ruled on", and dropped, only when the accepted rulings cover it
+   **end to end**. Partial overlap is not a ruling — it is two readings of one
+   stretch of text — so both are kept and reported. This is also why *"a
+   no-wick close to the 200 period moving average"* now reports its proximity
+   claim: `"close to"` straddles the ruled word `"close"`, and half a ruling is
+   no ruling.
+
+2. **A contested ruled term does not resolve.** Where a PARAMETERISE phrase and
+   a REFUSE phrase claim the same words, which one the source means is exactly
+   what is undefined, so **REFUSE wins outright**: the refusal is reported on
+   its own terms, and the ruled term is itemised as a contested match that
+   resolves nothing. The same holds when *both* rulings are PARAMETERISE — *"a
+   large no-wick candle"* is `large_wick` and `no_wick_candle` over the top of
+   one another, and they contradict each other; declaring the threshold that
+   happened to sort first would put a number on a contradiction the source has
+   not settled.
+
+The scan that finds these collisions asks about the **whole matched span**, its
+literal head nouns included, rather than the wildcard slot alone. Scoping it to
+the slot is what left this open, and scoping is what a sixth phrasing walks
+around.
+
+### How this is proved rather than asserted
+
+`tests/test_ambiguity.py` does not hand-write the sources it checks. It
+**enumerates** every phrase each declared pattern can spell, crosses them with
+every REFUSE term and every marker family, and places each probe at every
+position relative to the ruled phrase — before it, after it, in every gap
+between its words, and *sharing* one of its literal head nouns. Roughly three
+thousand sources, generated from the lexicon, and for every one of them: every
+REFUSE term and every marker the lexicon can find is either covered end to end
+by an accepted ruling or named in the emitted refusal. There is no third
+outcome and no silent one.
+
+The previous class-level test hand-wrote its carriers and passed while this
+defect was live, because every carrier it contained injected into the slot —
+the bug that had just been fixed. That is the difference between a corpus and a
+list of the sentences somebody remembered.
+
+The test is checked for vacuity by putting the defect back: restore the
+slot-scoped scan and the overlap-based suppression, and the generated corpus
+fails on the shipped phrasing. `tests/fixtures/intake/lexicon_collision.json`
+goes further — a lexicon whose patterns collide **on purpose**, with `closes?`
+declared as a head noun of a PARAMETERISE term whose REFUSE neighbour begins
+`"close to"`. Nothing in it has been written carefully, and the guarantee holds
+anyway, because it is not the patterns that hold it.
 
 ## Attribution: a parameterisation is never silent
 

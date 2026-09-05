@@ -179,12 +179,20 @@ A governed HSA strategy package must include, **as applicable**
 | 19 | acceptance / rejection criteria | Stated **before** the evidence arrives. |
 | 20 | provenance to original strategy source | Back to Matt's observation, the video, the book, the report. |
 | 21 | CER identity / evidence references | Per [`docs/CER-CONTRACT.md`](CER-CONTRACT.md). |
+| 22 | `lifecycle` | Status, immutability and what this version supersedes. Not from the `PID.md:124-146` list — it comes from acceptance criterion 13 (`PID.md:262`) and the versioning doctrine (`PID.md:183-189`), and it is required on every package (§5). A package built from the twenty-one elements above alone does **not** validate. |
 
-"As applicable" is the PID's own qualifier (`PID.md:124`). It licenses
-omitting an element that genuinely does not apply — and it does not license
-omitting one that is merely inconvenient or unresolved. An element that
-applies but is unknown is ambiguity, and takes the
-`STRATEGY_NOT_SUFFICIENTLY_DEFINED` route (§1.5), not a blank field.
+"As applicable" is the PID's own qualifier (`PID.md:124`), and the contract
+reads it narrowly: **every** element above is `required` in
+`contracts/strategy_package.schema.json`, and "as applicable" is honoured by
+allowing structurally empty content where a section genuinely does not apply —
+an empty `parameters` array for a fully fixed strategy — **never** by allowing
+the field itself to be absent. A missing section cannot be told apart from an
+overlooked one, and FORGE cannot tell the difference; an explicitly empty one
+is a decision on the record. (This paragraph used to read "as applicable" as
+licensing omission, which contradicted the schema it describes.)
+
+An element that applies but is unknown is neither absent nor empty: it is
+ambiguity, and takes the `STRATEGY_NOT_SUFFICIENTLY_DEFINED` route (§1.5).
 
 ### 3.1 The precision bar
 
@@ -358,6 +366,9 @@ guess is the one failure this Blueprint exists to prevent.
 - [ ] Acceptance and rejection criteria were written before the evidence.
 - [ ] Provenance reaches the original source.
 - [ ] CER identities are present and follow CER semantics.
+- [ ] `lifecycle` is stated: status, `immutable_once_promoted`, and what
+      this version supersedes (`null` for an original, stated rather than
+      omitted).
 - [ ] `hsa validate <package>` exits 0.
 - [ ] Nothing in the package requires FORGE to decide a trading question.
 

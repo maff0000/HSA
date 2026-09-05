@@ -37,7 +37,7 @@
     },
     "state_semantics": {
       "type": "object",
-      "description": "State the chain carries between evaluations (PID lines 73, 137). A chain that latches a context or an armed trigger must say so explicitly.",
+      "description": "State the chain carries between evaluations (PID lines 73, 138). A chain that latches a context or an armed trigger must say so explicitly.",
       "properties": {
         "stateful": {"type": "boolean"},
         "states": {
@@ -59,7 +59,7 @@
     "direction_semantics": {"$ref": "common.defs.json#/$defs/direction_semantics"},
     "timing": {
       "type": "object",
-      "description": "When the chain is evaluated and, for SEQUENCE, the window inside which the ordered steps must complete (PID lines 75, 136).",
+      "description": "When the chain is evaluated and, for SEQUENCE, the window inside which the ordered steps must complete (PID lines 75, 137).",
       "properties": {
         "evaluation_trigger": {"enum": ["BAR_CLOSE", "TICK", "ON_INPUT_CHANGE"]},
         "evaluation_timeframe": {"$ref": "common.defs.json#/$defs/timeframe"},
@@ -78,7 +78,7 @@
     },
     "persistence": {
       "type": "object",
-      "description": "How long a match remains asserted once produced (PID lines 76, 136).",
+      "description": "How long a match remains asserted once produced (PID lines 76, 137).",
       "properties": {
         "signal_persists": {"type": "boolean"},
         "persist_for_bars": {"type": "integer", "minimum": 0},
@@ -90,7 +90,7 @@
     },
     "expiry": {
       "type": "object",
-      "description": "When an un-consumed match or a latched state goes stale (PID lines 77, 136). If expires is true, the bar count and its timeframe are mandatory: an expiry without a measurable horizon is exactly the kind of discretionary language HSA must refuse (PID lines 110-120).",
+      "description": "When an un-consumed match or a latched state goes stale (PID lines 77, 137). If expires is true, the bar count and its timeframe are mandatory: an expiry without a measurable horizon is exactly the kind of discretionary language HSA must refuse (PID lines 110-120).",
       "properties": {
         "expires": {"type": "boolean"},
         "expires_after_bars": {"type": "integer", "minimum": 1},

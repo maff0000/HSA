@@ -16,6 +16,29 @@ with no refusal and no advisory. Text in the slot is now scanned exactly like
 any other prose, and a PARAMETERISE term whose slot holds unresolved language
 does not resolve (``term_match_policy`` in the lexicon).
 
+SUPPRESSION REQUIRES COVERAGE, NOT OVERLAP, AND OVERLAP RESOLUTION NEVER
+DELETES A REFUSAL. Those are the same rule stated twice, and they are the
+general form of everything above. Matches are collected first and overlaps
+resolved by a fixed rule, which is fine for deciding which term PARAMETERISES
+and was catastrophic for deciding what gets REPORTED: the loser was discarded.
+"no-wick close to resistance" hands the ruled word "close" to
+``no_wick_candle``, so ``near_resistance`` overlapped an accepted ruling, lost,
+and vanished — exit 0, nothing unresolved, a PID line 115 phrase gone without
+trace. That is the same silent path as the slot bug one phrasing further out,
+which is why it is now closed on the MATCH rather than on the slot:
+
+    A match is dropped as "already ruled on" only when the accepted rulings
+    COVER it end to end. Partial overlap is not a ruling — it is two readings
+    of one stretch of text — so both are kept and reported, and any
+    PARAMETERISE term whose matched span collides with unresolved language or
+    with a second ruling does not resolve at all
+    (``term_match_policy.overlap_resolution``).
+
+The scan that finds those collisions asks about the whole matched span, its
+literal head nouns included. Scoping it to the wildcard slot is what left this
+open after the previous repair, and scoping is exactly what a fifth phrasing
+walks around.
+
 A TERM MATCH MAY NOT SPAN A SENTENCE BOUNDARY. The same wildcard let a match
 run across a full stop — "a large trade. some wick setups only" matched
 ``large_wick`` — and swallow the start of the next sentence with it. The rule
@@ -73,7 +96,8 @@ actually is, and what it is not".
 Determinism: given the same text and the same lexicon, the same findings
 come out in the same order. Overlaps are resolved by a fixed rule (leftmost,
 then longest, then lexicon order), never by iteration order of a set or a
-dict.
+dict. That rule decides which term parameterises; it decides nothing about
+what is reported.
 """
 
 from __future__ import annotations
@@ -97,6 +121,7 @@ __all__ = [
     "QualifierHit",
     "RebasedFinding",
     "UnruledSlotFinding",
+    "ContestedMatchFinding",
     "UnknownFinding",
     "Analysis",
     "normalise",
@@ -270,7 +295,8 @@ class UnknownFinding:
 class SlotOccupant:
     """One unresolved thing found inside a term's wildcard slot."""
 
-    #: ``REFUSE_TERM`` or ``DISCRETIONARY_MARKER``.
+    #: ``REFUSE_TERM``, ``DISCRETIONARY_MARKER`` or ``RULED_TERM`` — the last
+    #: being a second PARAMETERISE ruling claiming the same words.
     kind: str
     #: The lexicon identity that recognised it: a term_id or a marker_id.
     identity: str
@@ -327,6 +353,51 @@ class UnruledSlotFinding:
 
 
 @dataclass(frozen=True)
+class ContestedMatchFinding:
+    """A PARAMETERISE term whose ruled phrase itself overlaps a refusal.
+
+    Not the slot — the LITERAL words. "no-wick close to resistance" gives the
+    ruled word "close" to ``no_wick_candle`` and to ``near_resistance`` at the
+    same time. One reading is a candle that closed without a wick; the other is
+    an entry taken close to resistance. The lexicon rules on both phrases and
+    the source has written them over the top of one another, so which one it
+    means is exactly what is undefined.
+
+    Overlap resolution is allowed to decide which term PARAMETERISES. It is not
+    allowed to decide that the loser was never said. So the refusal is reported
+    on its own terms, and the ruled term does not resolve: a parameter declared
+    here would be a parameter for whichever reading the analyser happened to
+    sort first, which is the silent guess PID line 39 forbids.
+    """
+
+    item_id: str
+    term: Term
+    occurrences: tuple[Occurrence, ...]
+    #: The colliding text, quoted verbatim: from the earlier of the term match
+    #: and the occupant to the later of the two, so a reader sees the collision
+    #: rather than one half of it.
+    contexts: tuple[Occurrence, ...]
+    occupants: tuple[SlotOccupant, ...]
+
+    @property
+    def location(self) -> str:
+        return "; ".join(occurrence.describe() for occurrence in self.occurrences)
+
+    @property
+    def context_text(self) -> str:
+        seen: list[str] = []
+        for context in self.contexts:
+            text = " ".join(context.text.split())
+            if text and text not in seen:
+                seen.append(text)
+        return " / ".join(seen)
+
+    @property
+    def occupant_summary(self) -> str:
+        return "; ".join(occupant.describe() for occupant in self.occupants)
+
+
+@dataclass(frozen=True)
 class Analysis:
     text: str
     lexicon: Lexicon
@@ -334,6 +405,10 @@ class Analysis:
     unknown_findings: tuple[UnknownFinding, ...]
     rebased_findings: tuple[RebasedFinding, ...] = ()
     unruled_slot_findings: tuple[UnruledSlotFinding, ...] = ()
+    #: PARAMETERISE terms whose ruled phrase itself collides with a refusal or
+    #: an unruled marker. Separate from the slot findings above only because
+    #: the two need different words to explain themselves; both fail closed.
+    contested_findings: tuple[ContestedMatchFinding, ...] = ()
     #: The lowercased, whitespace-collapsed copy the scan actually ran over.
     normalised: str = ""
     #: Spans of ``normalised`` that a ruled term LITERALLY claimed — the
@@ -406,6 +481,28 @@ def _occurrence(
     origin_end = index_map[end - 1] + 1
     line, column = _locate(text, starts, origin_start)
     end_line, end_column = _locate(text, starts, origin_end - 1)
+    return Occurrence(
+        text=text[origin_start:origin_end],
+        line=line,
+        column=column,
+        end_line=end_line,
+        end_column=end_column,
+        start=origin_start,
+        end=origin_end,
+    )
+
+
+def _origin_occurrence(
+    text: str, starts: Sequence[int], origin_start: int, origin_end: int
+) -> Occurrence:
+    """An Occurrence built from offsets already in the ORIGINAL text.
+
+    ``_occurrence`` maps normalised offsets back through the index map. A span
+    assembled from two findings that have already been located is in original
+    coordinates and must not be mapped a second time.
+    """
+    line, column = _locate(text, starts, origin_start)
+    end_line, end_column = _locate(text, starts, max(origin_start, origin_end - 1))
     return Occurrence(
         text=text[origin_start:origin_end],
         line=line,
@@ -561,6 +658,32 @@ def _ruled_spans(
 
 def _overlaps(spans: Sequence[tuple[int, int]], start: int, end: int) -> bool:
     return any(start < taken_end and taken_start < end for taken_start, taken_end in spans)
+
+
+def _covered(spans: Sequence[tuple[int, int]], start: int, end: int) -> bool:
+    """Whether EVERY character of ``[start, end)`` lies inside ``spans``.
+
+    This is the only thing that justifies suppressing a recognised match, and
+    it is deliberately stricter than ``_overlaps``. Suppression says "the
+    lexicon has already ruled on this"; that claim is true when a ruling
+    covers the whole of the thing, and false when a ruling covers part of it.
+    Overlap was used for the claim for three audits, and every time the answer
+    was the same silent hole: "close to resistance" merely TOUCHES the ruled
+    word "close" in "no-wick close", so overlap called it ruled, dropped it,
+    and a PID line 115 must-not-guess phrase left no trace at all.
+
+    Partial coverage is not a ruling. It is two readings of the same words,
+    which is precisely the condition the source has to resolve.
+    """
+    cursor = start
+    for span_start, span_end in sorted(spans):
+        if span_start > cursor:
+            break
+        if span_end > cursor:
+            cursor = span_end
+        if cursor >= end:
+            return True
+    return cursor >= end
 
 
 def _crosses_sentence(
@@ -760,15 +883,18 @@ def _unique_item_id(candidate: str, used: set[str], fallback: str) -> str:
     return unique
 
 
-def _slot_occupants(
+def _match_occupants(
     norm: str,
     text: str,
     index_map: Sequence[int],
     starts: Sequence[int],
+    span: tuple[int, int],
     slot: tuple[int, int],
+    literals: Sequence[tuple[int, int]],
     lexicon: Lexicon,
-) -> list[SlotOccupant]:
-    """Unresolved language sitting inside a PARAMETERISE term's own slot.
+    collisions: Sequence[tuple[int, int, Term]] = (),
+) -> tuple[list[SlotOccupant], list[SlotOccupant]]:
+    """Unresolved language overlapping a PARAMETERISE term's own match.
 
     Two kinds count, and they are the two kinds that fail closed anywhere else
     in the source: a ruled term the lexicon REFUSES, and a discretionary marker
@@ -776,24 +902,54 @@ def _slot_occupants(
 
     THIS IS A DIRECT SCAN, not a filter over what the main passes accepted, and
     the difference is the whole point. The main passes resolve overlaps: one
-    stretch of text belongs to one term. So a refusal that overlaps the ruled
-    term BOTH ways — partly in the slot, partly sharing its head noun — loses
-    that contest and vanishes, and "no wick confirmation candle" resolved at
-    exit 0 while containing PID line 117's "confirmation candle" verbatim.
-    Asking the narrower question here — is there unresolved language touching
-    this slot? — does not care who won the overlap, so a refusal cannot be
-    hidden by being adjacent to the ruled words as well as between them.
+    stretch of text belongs to one term. Asking the narrower question here — is
+    there unresolved language touching this match? — does not care who won that
+    contest, so a refusal cannot be hidden by winning or losing it.
+
+    THE REGION SCANNED IS THE WHOLE MATCH, not the wildcard slot alone. Scoping
+    it to the slot was the third repair of this defect and it held exactly as
+    far as the slot did: "no-wick close to resistance" puts near_resistance on
+    the term's own LITERAL head noun ("close"), nowhere near the slot, and the
+    refusal vanished at exit 0. The region a ruled phrase can hide something in
+    is the region it occupies, so that is the region that is asked about.
+
+    WHAT IS EXCLUDED, AND WHY ONLY THAT. A discretionary marker COVERED end to
+    end by this match's own literal spans is the term's own ruled word —
+    "large" in "large wick" is why large_wick exists, and reporting it would
+    refuse every term the lexicon parameterises. A REFUSE term is never
+    excluded, even if it falls wholly inside a literal: that is two rulings
+    claiming the same words, and preferring the PARAMETERISE one silently is
+    the defect this function exists to stop. No lexicon declares such a pair
+    today; the rule is written for the one that does.
 
     A qualifier that RE-BASES the term is not one of these. That is the
     separate SLOT attachment form, ruled on by ``basis_qualifier_policy``, and
     it produces its own finding.
+
+    ``collisions`` carries the other accepted term matches. A second ruling
+    overlapping this one is the same condition seen from the other side and is
+    reported the same way, whatever its disposition: "a large no-wick candle"
+    is large_wick and no_wick_candle claiming one phrase between them, and
+    letting the sort order pick which threshold gets declared is a guess about
+    a contradiction, not a resolution of it. A collision is always reported as
+    contested, never as slot content, because what is undefined is the overlap
+    and not the wildcard.
+
+    Returns ``(slot_occupants, literal_occupants)``. Both stop the term
+    resolving; they are separated only so the refusal can explain itself in the
+    right words — a wildcard nobody ruled on is a different thing to say than
+    two rulings claiming one phrase.
     """
+    match_start, match_end = span
     slot_start, slot_end = slot
-    if slot_end <= slot_start:
-        return []
+    if match_end <= match_start:
+        return [], []
 
     def touches(start: int, end: int) -> bool:
-        return start < slot_end and slot_start < end
+        return start < match_end and match_start < end
+
+    def in_slot(start: int, end: int) -> bool:
+        return slot_end > slot_start and start < slot_end and slot_start < end
 
     refused: list[tuple[int, int, Term]] = []
     for term in lexicon.terms:
@@ -803,12 +959,16 @@ def _slot_occupants(
             if match.end() > match.start() and touches(match.start(), match.end()):
                 refused.append((match.start(), match.end(), term))
 
-    occupants = [
-        SlotOccupant(
-            kind="REFUSE_TERM",
-            identity=term.term_id,
-            reason='the ruled term "%s", which the lexicon refuses' % term.label,
-            occurrence=_occurrence(text, index_map, starts, start, end),
+    occupants: list[tuple[int, int, SlotOccupant]] = [
+        (
+            start,
+            end,
+            SlotOccupant(
+                kind="REFUSE_TERM",
+                identity=term.term_id,
+                reason='the ruled term "%s", which the lexicon refuses' % term.label,
+                occurrence=_occurrence(text, index_map, starts, start, end),
+            ),
         )
         for start, end, term in refused
     ]
@@ -817,6 +977,9 @@ def _slot_occupants(
             start, end = match.start(), match.end()
             if end <= start or not touches(start, end):
                 continue
+            # The term's own ruled word, ruled in full by this very match.
+            if _covered(literals, start, end):
+                continue
             # A marker inside a refusal already listed above is that refusal's
             # own wording, not a second finding: "near" is why near_resistance
             # is unresolved, and reporting both says one thing twice.
@@ -824,27 +987,61 @@ def _slot_occupants(
                    for taken_start, taken_end, _term in refused):
                 continue
             occupants.append(
-                SlotOccupant(
-                    kind="DISCRETIONARY_MARKER",
-                    identity=marker.marker_id,
-                    reason=marker.reason,
-                    occurrence=_occurrence(
-                        text, index_map, starts, start, _widen(norm, end)
+                (
+                    start,
+                    end,
+                    SlotOccupant(
+                        kind="DISCRETIONARY_MARKER",
+                        identity=marker.marker_id,
+                        reason=marker.reason,
+                        occurrence=_occurrence(
+                            text, index_map, starts, start, _widen(norm, end)
+                        ),
                     ),
                 )
             )
 
-    unique: list[SlotOccupant] = []
+    colliding: list[SlotOccupant] = []
+    for start, end, term in collisions:
+        if (start, end) == span or not touches(start, end):
+            continue
+        colliding.append(
+            SlotOccupant(
+                kind="RULED_TERM",
+                identity=term.term_id,
+                reason=(
+                    'the ruled term "%s", which the lexicon rules onto a '
+                    "different measurement" % term.label
+                ),
+                occurrence=_occurrence(text, index_map, starts, start, end),
+            )
+        )
+
+    in_the_slot: list[SlotOccupant] = []
+    on_the_literal: list[SlotOccupant] = []
     seen: set[tuple[str, int, int]] = set()
-    for occupant in sorted(
-        occupants, key=lambda item: (item.occurrence.start, item.kind, item.identity)
+    for start, end, occupant in sorted(
+        occupants,
+        key=lambda item: (item[2].occurrence.start, item[2].kind, item[2].identity),
     ):
         key = (occupant.identity, occupant.occurrence.start, occupant.occurrence.end)
         if key in seen:
             continue
         seen.add(key)
-        unique.append(occupant)
-    return unique
+        if in_slot(start, end):
+            in_the_slot.append(occupant)
+        else:
+            on_the_literal.append(occupant)
+    for occupant in colliding:
+        key = (occupant.identity, occupant.occurrence.start, occupant.occurrence.end)
+        if key in seen:
+            continue
+        seen.add(key)
+        on_the_literal.append(occupant)
+    on_the_literal.sort(
+        key=lambda item: (item.occurrence.start, item.kind, item.identity)
+    )
+    return in_the_slot, on_the_literal
 
 
 def analyse(text: str, lexicon: Lexicon) -> Analysis:
@@ -878,26 +1075,49 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     # declared basis_slot is wildcard text sitting between the ruled words, so
     # it neither belongs to the ruled phrase nor stops anything else being
     # found there — another ruled term, or a discretionary marker.
+    #
+    # A candidate is skipped only when the rulings already accepted COVER it
+    # end to end. Overlapping one was the old test and it is what made this
+    # contest able to delete a refusal: "close to resistance" overlaps the
+    # ruled word "close" in "no-wick close", so near_resistance — PID line 115
+    # — lost the contest and was never reported. Coverage is the honest test,
+    # because coverage is what the word "ruled" is actually claiming. Two
+    # matches that merely overlap are two readings of the same words, and both
+    # are recorded; which of them PARAMETERISES is settled below, and a term
+    # whose match collides with unresolved language does not parameterise at
+    # all (``term_match_policy.overlap_resolution``).
     ruled: list[tuple[int, int]] = []
     accepted: list[tuple[int, int, Term, "re.Match[str]", tuple[int, int]]] = []
     for start, end, _order, term, match in candidates:
-        if _overlaps(ruled, start, end):
+        if _covered(ruled, start, end):
             continue
         slot = _slot_span(match, start)
         ruled.extend(_ruled_spans(start, end, slot))
         accepted.append((start, end, term, match, slot))
     accepted.sort(key=lambda item: item[0])
 
+    # The accepted matches as bare spans, for the collision check below. Two
+    # rulings claiming one phrase is undefined language whichever dispositions
+    # they carry, so this is not filtered by disposition.
+    collisions = [(start, end, term) for start, end, term, _match, _slot in accepted]
+
     # Pass 2 — fail closed. Any declared discretionary marker that no ruled
     # term consumed is an unresolved item. This is the mechanism that stops an
     # unknown term passing through silently (PID line 39), and it runs before
     # the PARAMETERISE terms are allowed to resolve, because what it finds
-    # inside a term's slot is one of the things that stops them.
+    # touching a term's match is one of the things that stops them.
+    #
+    # "Consumed" is COVERAGE, not overlap, for the same reason as above: a
+    # marker half inside a ruled phrase and half outside it has been ruled on
+    # by nobody. "close to" straddling the ruled word "close" in "a no-wick
+    # close to the 200 MA" is a proximity claim with no stated tolerance, and
+    # dropping it because one of its two words was ruled is the same silent
+    # path in marker form.
     unknown_hits: list[tuple[int, int, Marker]] = []
     for marker in lexicon.markers:
         for match in marker.pattern.finditer(norm):
             start, end = match.start(), match.end()
-            if _overlaps(ruled, start, end):
+            if _covered(ruled, start, end):
                 continue
             unknown_hits.append((start, end, marker))
     unknown_hits.sort(key=lambda item: (item[0], -(item[1] - item[0])))
@@ -940,6 +1160,9 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     slot_occupants: dict[str, list[SlotOccupant]] = {}
     slot_texts: dict[str, list[Occurrence]] = {}
     slot_occurrences: dict[str, list[Occurrence]] = {}
+    contested_occupants: dict[str, list[SlotOccupant]] = {}
+    contested_contexts: dict[str, list[Occurrence]] = {}
+    contested_occurrences: dict[str, list[Occurrence]] = {}
     for start, end, term, match, slot in accepted:
         window = _window_span(bounds, start, end, sentences_after)
         occurrence = _occurrence(text, index_map, starts, start, end)
@@ -951,21 +1174,42 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         term_hits.setdefault(term.term_id, [])
         term_unattached.setdefault(term.term_id, [])
         slot_occupants.setdefault(term.term_id, [])
+        contested_occupants.setdefault(term.term_id, [])
         if term.disposition != PARAMETERISE:
             # A REFUSE term already refuses; there is no ruled basis for
             # context to displace, so scanning it would only add noise.
             continue
 
         slot_start, slot_end = slot
-        occupants = _slot_occupants(
-            norm, text, index_map, starts, slot, lexicon
+        literals = _ruled_spans(start, end, slot)
+        in_slot, on_literal = _match_occupants(
+            norm,
+            text,
+            index_map,
+            starts,
+            (start, end),
+            slot,
+            literals,
+            lexicon,
+            collisions,
         )
-        if occupants:
-            slot_occupants[term.term_id].extend(occupants)
+        if in_slot:
+            slot_occupants[term.term_id].extend(in_slot)
             slot_texts.setdefault(term.term_id, []).append(
                 _occurrence(text, index_map, starts, slot_start, slot_end)
             )
             slot_occurrences.setdefault(term.term_id, []).append(occurrence)
+        if on_literal:
+            contested_occupants[term.term_id].extend(on_literal)
+            contested_contexts.setdefault(term.term_id, []).append(
+                _origin_occurrence(
+                    text,
+                    starts,
+                    min([occurrence.start] + [o.occurrence.start for o in on_literal]),
+                    max([occurrence.end] + [o.occurrence.end for o in on_literal]),
+                )
+            )
+            contested_occurrences.setdefault(term.term_id, []).append(occurrence)
 
         hits, unattached = _attachment(
             norm,
@@ -988,10 +1232,11 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         term_hits[term.term_id].extend(hits)
 
     # One term_id, one ruling. If any occurrence of a ruled term is re-based,
-    # or holds unresolved language in its own slot, the term does not resolve
-    # at all: its parameter would be declared once for the whole draft, so
-    # there is no coherent way to half-declare it, and the fail-closed
-    # direction is the one docs/AMBIGUITY-POLICY.md takes.
+    # holds unresolved language in its own slot, or has its ruled phrase
+    # contested by a refusal, the term does not resolve at all: its parameter
+    # would be declared once for the whole draft, so there is no coherent way
+    # to half-declare it, and the fail-closed direction is the one
+    # docs/AMBIGUITY-POLICY.md takes.
     term_findings = tuple(
         TermFinding(
             term=term_by_id[term_id],
@@ -1009,7 +1254,9 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             ),
         )
         for term_id, occurrences in term_occurrences.items()
-        if not term_hits[term_id] and not slot_occupants[term_id]
+        if not term_hits[term_id]
+        and not slot_occupants[term_id]
+        and not contested_occupants[term_id]
     )
 
     used_item_ids: set[str] = {finding.term.term_id for finding in term_findings}
@@ -1063,6 +1310,22 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             )
         )
 
+    contested_findings: list[ContestedMatchFinding] = []
+    for term_id, occupants in contested_occupants.items():
+        if not occupants:
+            continue
+        contested_findings.append(
+            ContestedMatchFinding(
+                item_id=_unique_item_id(
+                    "contested_" + term_id, used_item_ids, "contested_term"
+                ),
+                term=term_by_id[term_id],
+                occurrences=tuple(contested_occurrences[term_id]),
+                contexts=tuple(contested_contexts[term_id]),
+                occupants=tuple(occupants),
+            )
+        )
+
     grouped: dict[tuple[str, str], list[Occurrence]] = {}
     markers_by_key: dict[tuple[str, str], Marker] = {}
     for start, _end, widened_end, marker in marker_hits:
@@ -1094,6 +1357,7 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         unknown_findings=tuple(unknown_findings),
         rebased_findings=tuple(rebased_findings),
         unruled_slot_findings=tuple(unruled_slot_findings),
+        contested_findings=tuple(contested_findings),
         normalised=norm,
         ruled_spans=tuple(sorted(ruled)),
     )

@@ -521,7 +521,7 @@
     "The 4H series must have at least slow_period (200) closed bars of history before the CONTEXT input can be evaluated at all.",
     "The 5M series must have at least range_lookback (12) closed bars preceding the evaluated bar before the TRIGGER input can be evaluated.",
     "The strategy is expected to be dormant for long stretches: 4H cross events are infrequent by construction, and dormancy between them is the designed resting state rather than a failure (PID line 195).",
-    "No claim is made for this strategy outside the market shape it names. It must not be tuned to restore trade frequency (PID line 197)."
+    "No claim is made for this strategy outside the market shape it names. It must not be tuned to restore trade frequency (PID line 196)."
   ],
   "parameters": [
     {

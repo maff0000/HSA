@@ -51,7 +51,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "description": "A fixed set of HERMES facts and the exact output they must produce. Determinism (PID line 49) is only a claim until it is pinned by cases like these.",
+        "description": "A fixed set of HERMES facts and the exact output they must produce. Determinism (PID line 50) is only a claim until it is pinned by cases like these.",
         "properties": {
           "case_id": {
             "type": "string",

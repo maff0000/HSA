@@ -240,7 +240,7 @@ def test_criterion_4_the_package_decomposes_into_atomic_strategies(package):
 
 def test_criterion_4_each_embedded_atomic_is_valid_on_its_own(package):
     """Each embedded definition validates against the atomic contract by
-    itself: an atomic strategy is independently testable (PID line 47)."""
+    itself: an atomic strategy is independently testable (PID line 49)."""
     for atomic in package["atomic_strategies"]:
         assert validate_document(atomic, kind="atomic_strategy") == "atomic_strategy"
 
@@ -626,7 +626,7 @@ def test_the_package_carries_no_account_or_broker_state(package):
 
 
 def test_criterion_11_the_package_carries_deterministic_test_cases(package):
-    """PID criterion 11, and PID line 49: determinism is a claim until it is
+    """PID criterion 11, and PID line 50: determinism is a claim until it is
     pinned by cases."""
     cases = package["deterministic_test_cases"]
     assert len(cases) >= 4

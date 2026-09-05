@@ -260,6 +260,16 @@ class Lexicon:
         return self.term_match_policy["unruled_slot_content"]
 
     @property
+    def overlap_policy(self) -> Mapping[str, Any]:
+        """The ruling applied when two rulings claim the same words.
+
+        Overlap resolution picks which term parameterises; this states what it
+        may NOT do while picking, which is delete a refusal or a marker from
+        the report.
+        """
+        return self.term_match_policy["overlap_resolution"]
+
+    @property
     def sentence_terminators(self) -> str:
         """Terminators a term match may not cross. One declaration, one place.
 
@@ -775,6 +785,14 @@ def _load_term_match_policy(
       wildcard slot holds a REFUSE term or an unruled marker. It refuses, for
       the same reason ``unknown_term_policy`` does: undefined language about
       the measurement is undefined language, and it fails closed.
+    * ``overlap_resolution`` — what the overlap contest may and may not do. It
+      may decide which term parameterises; it may not decide that the loser was
+      never said. A PARAMETERISE term whose match collides with a refusal
+      refuses too, and for the same reason the other two do.
+
+    All three are declared here rather than assumed in code so that a lexicon
+    which drops one, or flips it to PARAMETERISE, fails to load instead of
+    quietly re-opening the silent path.
     """
     where = "%s: term_match_policy" % path
     _require_text(raw, "description", where)
@@ -819,6 +837,34 @@ def _load_term_match_policy(
     _require_text(unruled, "precedence", sub)
     _require_text(unruled, "why_unresolved_template", sub)
     resolution = _require(unruled, "resolution_needed", sub)
+    deeper = "%s resolution_needed" % sub
+    _check_enum(_require(resolution, "kind", deeper), _RESOLUTION_KINDS, deeper, "kind")
+    _check_enum(
+        _require(resolution, "responsible", deeper), _RESPONSIBLE, deeper, "responsible"
+    )
+    _require_text(resolution, "description_template", deeper)
+
+    sub = "%s overlap_resolution" % where
+    overlap = _require(raw, "overlap_resolution", where)
+    if overlap.get("disposition") != REFUSE:
+        raise LexiconError(
+            "%s: disposition must be REFUSE. When a ruled PARAMETERISE phrase "
+            "and a ruled REFUSE phrase claim the same words, which one the "
+            "source means is exactly what is undefined; resolving the "
+            "PARAMETERISE reading because the analyser sorted it first is a "
+            "silent guess (PID line 39)" % sub
+        )
+    _check_enum(_require(overlap, "severity", sub), _SEVERITIES, sub, "severity")
+    raw_blocks = _require(overlap, "blocks", sub)
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise LexiconError("%s: blocks must be a non-empty list" % sub)
+    for block in raw_blocks:
+        _check_enum(block, _BLOCKS, sub, "blocks entry")
+    _require_text(overlap, "rule", sub)
+    _require_text(overlap, "precedence", sub)
+    _require_text(overlap, "why", sub)
+    _require_text(overlap, "why_unresolved_template", sub)
+    resolution = _require(overlap, "resolution_needed", sub)
     deeper = "%s resolution_needed" % sub
     _check_enum(_require(resolution, "kind", deeper), _RESOLUTION_KINDS, deeper, "kind")
     _check_enum(

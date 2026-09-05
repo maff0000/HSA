@@ -193,7 +193,8 @@ python3 -m hsa.cli cer list --strategy <id> --strategy-version <version>
 
 Acceptance criterion 13 (`PID.md:262`) requires HSA to *produce a separately
 versioned candidate rather than mutate an existing promoted strategy*. The
-inventory holds one version of one strategy, and that is not an oversight:
+inventory holds one version *per* strategy — two strategies, one version each,
+as the table above lists — and that is not an oversight:
 
 `hsa.versioning.derive_candidate` **refuses a parent that was never
 promoted**, because a version that has not been through the gates is not

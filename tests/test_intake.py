@@ -1,6 +1,6 @@
 """The intake pipeline and the ``hsa intake`` command — PID lines 99-120.
 
-Acceptance criterion 2 (PID line 252) is "ingest a realistic raw strategy
+Acceptance criterion 2 (PID line 251) is "ingest a realistic raw strategy
 description". These tests drive the real fixtures in
 ``tests/fixtures/intake`` end to end, through the same code path the CLI
 uses, and check the two structured outcomes rather than any prose.

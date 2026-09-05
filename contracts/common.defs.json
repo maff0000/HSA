@@ -42,7 +42,7 @@
     },
     "direction_semantics": {
       "type": "object",
-      "description": "How direction is derived and expressed. Required everywhere direction can be observed (PID lines 74, 135).",
+      "description": "How direction is derived and expressed. Required everywhere direction can be observed (PID lines 74, 136).",
       "properties": {
         "emits": {
           "type": "array",

@@ -38,7 +38,7 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": {"$ref": "atomic_strategy.schema.json"},
-      "description": "Full atomic strategy definitions, embedded (PID line 133). Each is independently testable on its own (PID line 47)."
+      "description": "Full atomic strategy definitions, embedded (PID line 133). Each is independently testable on its own (PID line 49)."
     },
     "timeframe_roles": {
       "type": "object",

@@ -284,7 +284,7 @@ def test_enumerated_parameter_defaults_are_allowed_values(entry):
 
 
 def test_entry_has_both_a_matching_and_a_non_matching_test_case(entry):
-    """Determinism is a claim until a case pins it, both ways (PID line 49).
+    """Determinism is a claim until a case pins it, both ways (PID line 50).
 
     An entry with only matching cases has not been shown to discriminate.
     """

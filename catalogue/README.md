@@ -19,19 +19,29 @@ expected to move.
 
 ## The entries
 
-| `strategy_id` | Measures | The discretionary term it replaces |
-| --- | --- | --- |
-| `golden_cross` | Fast moving average crossing the slow moving average; up is the golden cross, down the death cross. | — |
-| `range_breakout` | Close beyond a consolidation boundary by a fraction of the range height. | *good breakout* (PID line 118) |
-| `swing_level_proximity` | Distance from close to the most recent confirmed swing high or low, in ATR multiples. | *near resistance* (PID line 115) |
-| `rejection_wick` | Wick length, body length and opposing wick length, each as a fraction of the bar range, over an ATR floor. | *large wick* (PID line 114) |
-| `no_wick_candle` | Body as a fraction of bar range with both wicks bounded, over an ATR floor. | *no wick* — a proportion, not an absolute |
-| `engulfing_candle` | Current body length against the prior opposite body length. | — |
-| `momentum_thrust` | Net close-to-close displacement in ATR multiples, with adverse excursion bounded. | *strong trend* (PID line 116) |
-| `volatility_expansion` | Short-window ATR over long-window ATR, above a threshold, held for a bar count. | — |
-| `range_compression` | The same ratio below a threshold, held for a bar count. | — |
-| `structure_break` | Close beyond the most recent confirmed swing level by an ATR multiple. | — |
-| `level_retest` | Return to a HERMES-reported broken level within an ATR tolerance and a bar budget. | — |
+The third column is **not** one relationship. Only a PARAMETERISE term has a
+declared `realised_by` link in `hsa/intake/lexicon.json`, checked end to end by
+`tests/test_lexicon_catalogue_agreement.py`; a REFUSE term has no realisation
+at all, because its measurement basis is undefined and there is nothing to
+realise. What an entry offers a REFUSE term is a measurable construction the
+author could *choose*, and HSA never chooses it for them
+(`docs/AMBIGUITY-POLICY.md`). The column used to run both together under "the
+discretionary term it replaces", which reads as though a refusal had been
+answered when it has not been.
+
+| `strategy_id` | Measures | Discretionary term | Relationship |
+| --- | --- | --- | --- |
+| `golden_cross` | Fast moving average crossing the slow moving average; up is the golden cross, down the death cross. | — | — |
+| `range_breakout` | Close beyond a consolidation boundary by a fraction of the range height. | *good breakout* (PID line 118) | one measurable option a refusal could be resolved to; still refused |
+| `swing_level_proximity` | Distance from close to the most recent confirmed swing high or low, in ATR multiples. | *near resistance* (PID line 115) | one measurable option a refusal could be resolved to; still refused |
+| `rejection_wick` | Wick length, body length and opposing wick length, each as a fraction of the bar range, over an ATR floor. | *large wick* (PID line 114) | **declared `realised_by`** — this is what the ruled parameter is implemented as |
+| `no_wick_candle` | Body as a fraction of bar range with both wicks bounded, over an ATR floor. | *no wick* — a proportion, not an absolute | **declared `realised_by`** |
+| `engulfing_candle` | Current body length against the prior opposite body length. | — | — |
+| `momentum_thrust` | Net close-to-close displacement in ATR multiples, with adverse excursion bounded. | *strong trend* (PID line 116) | one measurable option a refusal could be resolved to; still refused |
+| `volatility_expansion` | Short-window ATR over long-window ATR, above a threshold, held for a bar count. | — | — |
+| `range_compression` | The same ratio below a threshold, held for a bar count. | — | — |
+| `structure_break` | Close beyond the most recent confirmed swing level by an ATR multiple. | — | — |
+| `level_retest` | Return to a HERMES-reported broken level within an ATR tolerance and a bar budget. | — | — |
 
 Together they cover every example named at PID line 55.
 

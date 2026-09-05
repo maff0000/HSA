@@ -17,7 +17,7 @@
   },
 
     "term_match_policy": {
-      "description": "How much of a term match is actually RULED text, and where a match may end. A term's pattern is part literal and part wildcard: the literal parts are the phrase the lexicon rules on, and the declared basis_slot group is a wildcard run of words that merely sits between them. Treating the whole matched span as ruled is what let a slot swallow \"near resistance\" — a PID line 115 must-not-guess phrase — and hide it, because anything a ruled term consumed was never scanned again. This block states the two rules that close that, and both are enforced for EVERY term, not for the terms that happened to expose the bug.",
+      "description": "How much of a term match is actually RULED text, and where a match may end. A term's pattern is part literal and part wildcard: the literal parts are the phrase the lexicon rules on, and the declared basis_slot group is a wildcard run of words that merely sits between them. Treating the whole matched span as ruled is what let a slot swallow \"near resistance\" — a PID line 115 must-not-guess phrase — and hide it, because anything a ruled term consumed was never scanned again. This block states the three rules that close that, and all three are enforced for EVERY term, not for the terms that happened to expose the bug. overlap_resolution is the general one the other two turned out to be special cases of: suppression requires a ruling that COVERS the text end to end, and a PARAMETERISE term whose match collides with unresolved language anywhere — wildcard slot or literal head noun — does not resolve.",
       "sentence_boundary": {
         "rule": "SENTENCE",
         "sentence_terminators": ".!?;",
@@ -40,6 +40,23 @@
         "resolution_needed": {
           "kind": "MEASURABLE_DEFINITION",
           "description_template": "Resolve the unresolved language inside \"{phrase}\" first: {findings}. Then restate the rule so \"{term_label}\" is either qualified by measured words or left unqualified, in which case its ratified basis ({measurement_basis}) applies.",
+          "responsible": "MATT"
+        }
+      },
+      "overlap_resolution": {
+        "rule": "Overlap resolution decides which term PARAMETERISES. It never decides that a recognised term or marker was not said. A match is treated as already ruled on, and dropped, only when the accepted rulings COVER it end to end; a match that merely overlaps one is kept and reported. A PARAMETERISE term whose own matched span — its literal head nouns included, not the wildcard slot alone — overlaps a REFUSE term, an unruled discretionary marker, or a second ruled term does NOT resolve.",
+        "disposition": "REFUSE",
+        "severity": "BLOCKING",
+        "blocks": [
+          "ATOMIC_DECOMPOSITION",
+          "PARAMETER_DEFINITION"
+        ],
+        "precedence": "REFUSE wins outright. Where a ruled PARAMETERISE phrase and a ruled REFUSE phrase claim the same words, the source has written two readings over the top of one another, and which one it means is exactly what is undefined. Both are reported: the refusal on its own terms, and the PARAMETERISE term as a contested match that does not resolve. The same holds when both rulings are PARAMETERISE \u2014 \"a large no-wick candle\" is large_wick and no_wick_candle claiming one phrase between them, and declaring the threshold the analyser sorted first would put a number on a contradiction the source has not settled.",
+        "why": "The contest is ordered leftmost, then longest, then lexicon order, and for three audits the loser was simply discarded. Discarding is safe between two PARAMETERISE readings and silent for a refusal: \"no-wick close to resistance\" gives the ruled word \"close\" to no_wick_candle, so near_resistance — a PID line 115 must-not-guess phrase — lost the contest, was dropped, and the source resolved at exit 0 with nothing unresolved at all. Scoping the earlier repairs to the wildcard slot fixed the phrasings that used the slot and left every phrasing that collides with a literal head noun. This rule is stated over the MATCH, in the analyser, so it holds for a term nobody has declared yet rather than for the patterns written so far.",
+        "why_unresolved_template": "HSA recognised the ruled term \"{term_label}\" here, but its ruled phrase overlaps language the lexicon does not resolve: {findings}. The colliding text is \"{context_text}\". Two rulings claim the same words, so the ratified basis for \"{term_label}\" ({measurement_basis}) may not be what the source is describing at all. Settling that by which match the analyser happened to sort first would be a silent guess (PID line 39; docs/AMBIGUITY-POLICY.md, 'Overlap resolution never deletes a refusal').",
+        "resolution_needed": {
+          "kind": "MEASURABLE_DEFINITION",
+          "description_template": "Restate \"{context_text}\" so the two readings are separated: {findings}. Say which condition the rule actually depends on, and give the unresolved one a measurable definition. If \"{term_label}\" was meant on its own, its ratified basis ({measurement_basis}) applies once the collision is gone.",
           "responsible": "MATT"
         }
       }

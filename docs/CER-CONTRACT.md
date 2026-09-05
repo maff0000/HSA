@@ -221,8 +221,13 @@ The durable statement of intent: if a future change adds a write to
   to a specific strategy version.
 * Every reference declares its `source` explicitly, so what is fixture and
   what is live is always knowable without asking anyone.
-* The canonical `reference_type` and `supports` vocabularies are fixed by
-  `contracts/common.defs.json`.
+* The canonical `reference_type` vocabulary is fixed by
+  `contracts/common.defs.json` (`$defs.cer_reference_type`), and the canonical
+  `supports` vocabulary by `contracts/cer_reference.schema.json` (the
+  `supports` property's enum). They live in different files because
+  `reference_type` is shared vocabulary and `supports` is used by this one
+  document kind; the word `supports` does not appear in `common.defs.json` at
+  all.
 
 **Must NOT assume:**
 

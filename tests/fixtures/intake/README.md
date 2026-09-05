@@ -29,6 +29,7 @@ acceptance fixtures went missing from this table the first time.
 | `existing_specification.json` | EXISTING_SPECIFICATION | draft, structured-request form |
 | `empty.txt` | any | error: nothing to analyse |
 | `lexicon_advisory.json` | — | test lexicon whose items are ADVISORY, not BLOCKING |
+| `lexicon_collision.json` | — | test lexicon whose patterns collide on purpose: a PARAMETERISE head noun a REFUSE term also claims. Proves the overlap invariant is enforced on the match, not by patterns being written carefully |
 
 ## Two files whose names read alike
 

@@ -20,7 +20,9 @@ import pytest
 
 from hsa.contracts import validate_document
 from hsa.intake import build_request, intake, load_lexicon
+from hsa.intake import analyser as analyser_module
 from hsa.intake.analyser import analyse
+from hsa.intake.documents import unresolved_items
 from hsa.intake.errors import LexiconError
 from hsa.intake.lexicon import PARAMETERISE, REFUSE
 
@@ -1107,6 +1109,448 @@ def test_no_ruled_term_match_can_hide_a_refuse_term_or_a_marker(lexicon):
             for phrase in hidden:
                 assert phrase in emitted, (source, phrase)
     assert checked > 100, "the corpus stopped exercising the property"
+
+
+# --- overlap resolution never deletes a refusal -------------------------------
+#
+# The three sections above each closed one PHRASING of one defect. This closes
+# the defect. Matches are collected and overlaps resolved by a fixed rule, and
+# for three audits the loser of that contest was simply discarded — which is
+# fine for deciding who parameterises and fatal for deciding what is reported.
+# "no-wick close to resistance" gives the ruled word "close" to no_wick_candle,
+# so near_resistance (PID line 115) lost, was dropped, and the source resolved
+# at exit 0 with nothing unresolved at all.
+#
+# The rule now enforced is one sentence: overlap resolution may decide which
+# term RESOLVES; it may never leave a recognised REFUSE term or a declared
+# marker unreported. Suppression therefore requires COVERAGE, not overlap, and
+# a PARAMETERISE term whose match collides with unresolved language — literal
+# head nouns included, not the wildcard slot alone — does not resolve.
+
+
+#: The fourth audit's reproduction and its two controls, verbatim. The controls
+#: prove the swallowed term fires on its own, so the first case is a refusal
+#: being DELETED and not one the lexicon never recognised.
+OVERLAP_REPRODUCTIONS = [
+    (
+        "refusal_on_the_terms_own_head_noun",
+        "XAUUSD 15m. I enter on a no-wick close to resistance.",
+    ),
+    ("control_close_to", "XAUUSD 15m. I enter close to resistance."),
+    ("control_near", "XAUUSD 15m. I enter near resistance."),
+]
+
+
+@pytest.mark.parametrize(("name", "source"), OVERLAP_REPRODUCTIONS)
+def test_an_overlap_cannot_delete_a_refusal(name, source, lexicon):
+    assert _refuses(source, lexicon), name
+
+
+def test_the_refusal_and_the_contested_term_are_both_named(lexicon):
+    """Both halves matter, and only together.
+
+    Surfacing "near resistance" is necessary: it is a PID line 115 phrase and
+    the source must say so. Stopping ``no_wick_candle`` resolving is necessary
+    too: the two rulings claim the same word, so which one the source means is
+    undefined, and declaring a threshold for whichever match sorted first is a
+    guess about the ambiguity rather than a reading of it.
+    """
+    source = "XAUUSD 15m. I enter on a no-wick close to resistance."
+    analysis = _analyse_text(source, lexicon)
+    assert not analysis.parameterised, "the term resolved over a refusal"
+    assert [f.term.term_id for f in analysis.contested_findings] == ["no_wick_candle"]
+
+    request = build_request(source, "TRADER_EXPLANATION", "unit test")
+    result = intake(request, lexicon=lexicon, generated_at_utc=STAMP)
+    assert not result.sufficiently_defined
+    items = {item["item_id"]: item for item in result.document["unresolved_items"]}
+    assert "near_resistance" in items
+    assert "contested_no_wick_candle" in items
+    contested = items["contested_no_wick_candle"]
+    assert contested["severity"] == "BLOCKING"
+    # The refusal quotes the COLLISION. Either half alone reads as an ordinary
+    # finding and hides the fact that two rulings are claiming one phrase.
+    assert "no-wick close to resistance" in contested["source_language"]
+    assert "near resistance" in contested["why_unresolved"]
+
+
+def test_a_term_not_near_a_refusal_still_resolves(lexicon):
+    """The other direction. A guard that refuses valid prose is a new defect.
+
+    "no-wick close" is a ruled PARAMETERISE phrase and must keep resolving when
+    nothing collides with it. If the invariant made this impossible it would be
+    refusing the language the lexicon exists to parameterise.
+    """
+    source = "XAUUSD 15m. I need a no-wick close on the 5m."
+    assert not _refuses(source, lexicon)
+    analysis = _analyse_text(source, lexicon)
+    assert [f.term.term_id for f in analysis.parameterised] == ["no_wick_candle"]
+
+
+def test_two_ruled_terms_claiming_one_phrase_refuse_rather_than_race(lexicon):
+    """A collision is undefined language whichever dispositions collide.
+
+    "a large no-wick candle" is large_wick and no_wick_candle over the top of
+    one another, and they contradict: one says the wick must exceed a fraction
+    of the bar range, the other that there is no wick. Before this rule the
+    contest picked large_wick because it started one word earlier, declared a
+    wick-ratio threshold, and dropped the other ruling without a word. Sort
+    order is not a reading of a contradiction.
+    """
+    source = "XAUUSD 15m. I take a large no-wick candle."
+    assert _refuses(source, lexicon)
+    analysis = _analyse_text(source, lexicon)
+    assert not analysis.parameterised
+    assert sorted(f.term.term_id for f in analysis.contested_findings) == [
+        "large_wick",
+        "no_wick_candle",
+    ]
+
+
+def test_a_marker_half_inside_a_ruled_phrase_is_not_suppressed(lexicon):
+    """Coverage, not overlap — the same rule in marker form.
+
+    "close to" straddles no_wick_candle's ruled word "close". Overlap called
+    that ruled and dropped it; it is a proximity claim with no stated tolerance
+    and nobody has ruled on it.
+    """
+    source = "XAUUSD 15m. I take a no-wick close to the 200 period moving average."
+    assert _refuses(source, lexicon)
+    analysis = _analyse_text(source, lexicon)
+    assert "proximity" in {f.marker.marker_id for f in analysis.unknown_findings}
+
+
+# --- the class-level guarantee, over a corpus generated from the patterns ------
+#
+# The previous class test hand-wrote its carriers, and that is precisely why it
+# passed while the defect was live: every carrier injected into the wildcard
+# SLOT, because the slot was the bug that had just been fixed. no_wick_candle's
+# pattern also spells "no wick close", and no hand-written carrier ever said so.
+#
+# So the corpus is not written here. It is ENUMERATED from the declared
+# patterns: every phrase each pattern can spell, crossed with every REFUSE term
+# and every marker family, placed at every position relative to the ruled
+# phrase — before it, after it, inside its slot, and sharing one of its literal
+# head nouns. A term added to the lexicon tomorrow is covered on the day it is
+# declared, without anybody remembering to extend a list.
+
+try:  # pragma: no cover - the module moved in 3.11 and both names are stdlib
+    from re import _parser as _sre_parser
+except ImportError:  # pragma: no cover
+    import sre_parse as _sre_parser
+
+#: Stands in for a pattern's declared basis_slot while the phrases are being
+#: enumerated, so the wildcard is filled deliberately rather than expanded.
+_SLOT_MARK = "\x00"
+
+
+def _spell(node, slot_id, limit):
+    """Every string a parsed pattern's literal alternations can spell."""
+    out = [""]
+    for op, argument in node:
+        name = str(op).rsplit(".", 1)[-1]
+        if name == "LITERAL":
+            out = [prefix + chr(argument) for prefix in out]
+        elif name == "IN":
+            char = ""
+            for inner_op, inner_arg in argument:
+                inner = str(inner_op).rsplit(".", 1)[-1]
+                if inner == "LITERAL":
+                    char = chr(inner_arg)
+                    break
+                if inner == "RANGE":
+                    char = chr(inner_arg[0])
+                    break
+            out = [prefix + char for prefix in out]
+        elif name == "BRANCH":
+            spelled = []
+            for branch in argument[1]:
+                for tail in _spell(branch, slot_id, limit):
+                    spelled.extend(prefix + tail for prefix in out)
+            out = spelled
+        elif name == "SUBPATTERN":
+            group, _add, _drop, body = argument
+            if group is not None and group == slot_id:
+                out = [prefix + _SLOT_MARK for prefix in out]
+            else:
+                inner = _spell(body, slot_id, limit)
+                out = [prefix + tail for prefix in out for tail in inner]
+        elif name in ("MAX_REPEAT", "MIN_REPEAT"):
+            low, _high, body = argument
+            inner = _spell(body, slot_id, limit)
+            spelled = list(out) if low == 0 else []
+            repeated = out
+            for _ in range(max(low, 1)):
+                repeated = [prefix + tail for prefix in repeated for tail in inner]
+            spelled.extend(repeated)
+            out = spelled
+        if len(out) > limit:
+            out = out[:limit]
+    return out
+
+
+def _phrases(term, limit=400):
+    """Every phrase ``term``'s pattern matches, slot empty, in a fixed order."""
+    parsed = _sre_parser.parse(term.pattern.pattern)
+    slot_id = parsed.state.groupdict.get("basis_slot")
+    ordered, seen = [], set()
+    for spelled in _spell(parsed, slot_id, limit):
+        phrase = spelled.replace(_SLOT_MARK, "")
+        if phrase and phrase not in seen:
+            seen.add(phrase)
+            ordered.append(phrase)
+    return ordered
+
+
+def _probe_families(lexicon):
+    """Every REFUSE term and every marker family, with all it can spell.
+
+    Read off the lexicon, so a term or a marker family declared tomorrow is
+    probed on the day it is declared and nobody has to remember a list here.
+    """
+    families = []
+    for term in lexicon.terms:
+        if term.disposition == PARAMETERISE:
+            continue
+        families.append(("REFUSE_TERM", term.term_id, _phrases(term)))
+    for marker in lexicon.markers:
+        families.append(("MARKER", marker.marker_id, _phrases(marker)))
+    return families
+
+
+def _first(phrases, predicate):
+    for phrase in phrases:
+        if predicate(phrase.split()):
+            return phrase
+    return None
+
+
+def _placements(words, family_phrases):
+    """The probe at every position relative to one ruled phrase.
+
+    Before it, after it, and in every gap between its words — which is where a
+    declared slot sits. Then the position the previous three repairs could not
+    reach: SHARING one of the ruled phrase's own literal words, at either end.
+    The sharing phrasings are picked out of everything the probe's pattern can
+    spell rather than written down, because "no wick close" colliding with
+    "close to resistance" is a fact about two patterns, not about a sentence
+    anybody thought to try.
+    """
+    representative = family_phrases[0].split()
+    placed = [
+        words[:index] + representative + words[index:]
+        for index in range(len(words) + 1)
+    ]
+    suffix = _first(family_phrases, lambda probe: probe[0] == words[-1])
+    if suffix is not None:
+        placed.append(words + suffix.split()[1:])
+    prefix = _first(family_phrases, lambda probe: probe[-1] == words[0])
+    if prefix is not None:
+        placed.append(prefix.split() + words[1:])
+    return placed
+
+
+def _collision_corpus(lexicon):
+    """Every ruled phrase, every probe family, every position. Fixed order."""
+    families = _probe_families(lexicon)
+    corpus, seen = [], set()
+    for term in lexicon.terms:
+        if term.disposition != PARAMETERISE:
+            continue
+        for phrase in _phrases(term):
+            words = phrase.split()
+            for _kind, _identity, family_phrases in families:
+                for placement in _placements(words, family_phrases):
+                    source = "xauusd 15m. i enter on a %s here." % " ".join(placement)
+                    if source not in seen:
+                        seen.add(source)
+                        corpus.append(source)
+    return corpus
+
+
+def _covers(spans, start, end) -> bool:
+    """Whether ``spans`` covers ``[start, end)`` end to end.
+
+    Written here rather than imported from the analyser on purpose: a test that
+    borrows the predicate it is checking cannot catch that predicate being
+    wrong, which is how the first version of this rule shipped.
+    """
+    cursor = start
+    for span_start, span_end in sorted(spans):
+        if span_start > cursor:
+            break
+        cursor = max(cursor, span_end)
+        if cursor >= end:
+            return True
+    return cursor >= end
+
+
+def _unreported(source: str, lexicon):
+    """Recognised discretionary language that left no trace in the output.
+
+    A REFUSE term match must appear in the emitted items, always — it is a
+    ruling the lexicon has already made, and there is no reading of "every
+    recognised term is either parameterised or itemised" that lets one vanish.
+    A marker is exempt only when the accepted rulings COVER it end to end,
+    which is the one case where something has genuinely been ruled on.
+    """
+    analysis = analyse(source, lexicon)
+    emitted = json.dumps(unresolved_items(analysis)).lower()
+    missing = []
+    for term in lexicon.terms:
+        if term.disposition == PARAMETERISE:
+            continue
+        for match in term.pattern.finditer(analysis.normalised):
+            if match.end() > match.start() and match.group(0) not in emitted:
+                missing.append((term.term_id, match.group(0)))
+    for marker in lexicon.markers:
+        for match in marker.pattern.finditer(analysis.normalised):
+            if match.end() <= match.start():
+                continue
+            if _covers(analysis.ruled_spans, match.start(), match.end()):
+                continue
+            if match.group(0) not in emitted:
+                missing.append((marker.marker_id, match.group(0)))
+    return missing
+
+
+def test_the_generated_corpus_actually_spells_the_declared_patterns(lexicon):
+    """The generator is checked before anything is concluded from it.
+
+    A corpus generator that silently produced nothing, or produced strings the
+    patterns do not match, would make every assertion below vacuously true.
+    """
+    for term in lexicon.terms:
+        phrases = _phrases(term)
+        assert phrases, "no phrase enumerated for %s" % term.term_id
+        for phrase in phrases:
+            assert term.pattern.fullmatch(phrase), (term.term_id, phrase)
+    # The phrasing the fourth audit found must be in there without anybody
+    # having written it down: it is one of the things no_wick_candle spells.
+    assert "no wick close" in _phrases(lexicon.term("no_wick_candle"))
+    for kind, identity, phrases in _probe_families(lexicon):
+        assert phrases, (kind, identity)
+        for phrase in phrases:
+            assert (
+                lexicon.term(identity).pattern.fullmatch(phrase)
+                if kind == "REFUSE_TERM"
+                else True
+            ), (identity, phrase)
+    corpus = _collision_corpus(lexicon)
+    assert len(corpus) > 2000
+    # The collision the fourth audit found is generated, not written down.
+    assert any("no wick close to resistance" in source for source in corpus)
+
+
+def test_no_overlap_leaves_a_refuse_term_or_a_marker_unreported(lexicon):
+    """The invariant, asserted over the whole generated corpus.
+
+    ``docs/AMBIGUITY-POLICY.md`` promises "no third path, and no silent one".
+    For four audits that sentence was enforced by nothing but prose. Here it is
+    a property: across every ruled phrase the lexicon can spell, every REFUSE
+    term and marker family, and every position one can take relative to the
+    other, nothing the analyser recognises goes unreported.
+    """
+    corpus = _collision_corpus(lexicon)
+    for source in corpus:
+        missing = _unreported(source, lexicon)
+        assert not missing, (source, missing)
+
+
+def test_that_invariant_test_is_not_vacuous(lexicon, monkeypatch):
+    """Re-arm the defect and watch the corpus catch it.
+
+    The defect was two lines: the scan for unresolved language looked at the
+    wildcard SLOT rather than the whole match, and suppression asked whether a
+    match OVERLAPPED a ruling rather than whether one covered it. Putting both
+    back reconstructs the analyser exactly as it was shipped when the fourth
+    audit found this, and if the corpus above cannot see that, the corpus is
+    decoration.
+    """
+    original = analyser_module._match_occupants
+
+    def slot_only(
+        norm, text, index_map, starts, span, slot, literals, lexicon, collisions=()
+    ):
+        return original(norm, text, index_map, starts, slot, slot, literals, lexicon)
+
+    monkeypatch.setattr(analyser_module, "_match_occupants", slot_only)
+    monkeypatch.setattr(
+        analyser_module,
+        "_covered",
+        lambda spans, start, end: analyser_module._overlaps(spans, start, end),
+    )
+    caught = [
+        source
+        for source in _collision_corpus(lexicon)
+        if _unreported(source, lexicon)
+    ]
+    assert caught, "the re-armed defect went undetected"
+    # And specifically the phrasing that was shipped, not merely something.
+    assert _unreported(
+        "XAUUSD 15m. I enter on a no-wick close to resistance.", lexicon
+    )
+
+
+def test_the_invariant_holds_for_a_lexicon_nobody_tightened(lexicon):
+    """The point of the rule: it is not the patterns that make this safe.
+
+    ``lexicon_collision.json`` declares a PARAMETERISE term with "closes?"
+    among its literal head nouns and a REFUSE term beginning "close to". They
+    claim the same word on purpose. No pattern in it has been made careful, and
+    the guarantee holds anyway, because it is enforced on the match.
+    """
+    loose = load_lexicon(FIXTURES / "lexicon_collision.json")
+    source = "XAUUSD 15m. I want a large close to resistance."
+    assert _refuses(source, loose)
+    items = {
+        item["item_id"]
+        for item in intake(
+            build_request(source, "TRADER_EXPLANATION", "unit test"),
+            lexicon=loose,
+            generated_at_utc=STAMP,
+        ).document["unresolved_items"]
+    }
+    assert {"near_resistance", "contested_large_wick"} <= items
+    # The ruled term still resolves when nothing collides with it.
+    assert not _refuses("XAUUSD 15m. I want a large close.", loose)
+    for source in _collision_corpus(loose):
+        assert not _unreported(source, loose), source
+
+
+def test_the_overlap_ruling_is_declared_data_not_code(lexicon):
+    """A reviewer must be able to read the ruling without reading Python."""
+    policy = lexicon.overlap_policy
+    assert policy["disposition"] == REFUSE
+    assert policy["severity"] == "BLOCKING"
+    assert "{term_label}" in policy["why_unresolved_template"]
+    assert "{findings}" in policy["why_unresolved_template"]
+    assert "{context_text}" in policy["why_unresolved_template"]
+    assert policy["resolution_needed"]["responsible"] in {"MATT", "SOURCE_AUTHOR"}
+
+
+def test_overlap_resolution_policy_must_refuse(tmp_path):
+    """A lexicon that flips this to PARAMETERISE re-opens the silent path."""
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["term_match_policy"]["overlap_resolution"]["disposition"] = PARAMETERISE
+    broken = tmp_path / "overlap_parameterise.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="must be REFUSE"):
+        load_lexicon(broken)
+
+
+def test_a_lexicon_with_no_overlap_ruling_is_refused_at_load(tmp_path):
+    """Silence is not a ruling. The declaration is required, like the others."""
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    del source["term_match_policy"]["overlap_resolution"]
+    broken = tmp_path / "no_overlap_ruling.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="overlap_resolution"):
+        load_lexicon(broken)
 
 
 # --- the ruling document and the emitted document must agree ------------------
