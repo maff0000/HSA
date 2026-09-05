@@ -384,14 +384,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-#: A citation, in BOTH forms the repository uses. The prose form, "PID line
+#: A citation, in EVERY form the repository uses. The prose form, "PID line
 #: 138", is what the schemas and Python docstrings use; the path form,
 #: ``PID.md:138``, is what the boot documents use, and there are two hundred of
 #: them. Checking only the first form would have left the larger half of the
 #: repository unchecked — the same mistake, one layer up, as checking only the
 #: first citation in one file.
+#:
+#: Two more forms were in the repository and invisible to this guard: the mixed
+#: form "PID.md line 55" (27 of them, most of the atomic catalogue) and the bare
+#: "PID 242" (7). Thirty-six citations that read as authority and that nothing
+#: opened. Widened here rather than by rewriting the citations, because the next
+#: author will write one of these forms too and the guard should already see it.
 _CITATION = re.compile(
-    r"(?:PID lines?\s+|PID\.md:)"
+    r"(?:PID\.md:|PID(?:\.md)?\s+lines?\s+|PID\s+(?=\d))"
     r"(\d+(?:\s*-\s*\d+)?(?:\s*,\s*(?:and\s+)?\d+(?:\s*-\s*\d+)?)*)"
 )
 
@@ -791,6 +797,208 @@ def test_a_citation_that_restates_a_pid_doctrine_bullet_cites_its_line():
                             )
                         )
     assert not wrong, "\n".join(wrong)
+
+
+# --- (4) a citation beside a must-not-guess phrase cites that phrase's line ---
+
+
+def _spoken(text: str) -> str:
+    """An identifier read as the words it spells.
+
+    ``test_large_wick_is_parameterised`` names *large wick*, and the citation
+    that got this wrong was in that function's docstring while the phrase it
+    was about was in the function's NAME. A check that only reads the line the
+    citation sits on cannot see that, which is why the first version of this
+    check passed on the very error it was written for.
+    """
+    return text.replace("_", " ").replace("-", " ").lower()
+
+
+def _must_not_guess_lines(pid: list[str]) -> dict[str, int]:
+    """Each PID must-not-guess phrase, mapped to the line that names it.
+
+    Read off the LEXICON's declared labels and resolved against PID.md, so this
+    holds no line numbers and no phrase list of its own. A phrase added to the
+    lexicon tomorrow is covered on the day it is declared, and one reworded in
+    the PID fails loudly in ``_item_line`` rather than silently going stale —
+    the same construction as DOCTRINE_RESTATEMENTS above, for the same reason.
+    """
+    lexicon = read_json_file(REPO_ROOT / "hsa" / "intake" / "lexicon.json")
+    found = {}
+    for term in lexicon["terms"]:
+        label = term["label"]
+        try:
+            found[label] = _item_line(pid, '"%s"' % label)
+        except AssertionError:
+            # Not one of the must-not-guess bullets (no_wick_candle is an
+            # atomic-strategy EXAMPLE, cited at a different line entirely).
+            continue
+    return found
+
+
+def test_a_citation_beside_a_must_not_guess_phrase_cites_that_phrases_line():
+    """The third table-free content check, and the one that was missing.
+
+    ``test_large_wick_is_parameterised_not_rejected`` named *large wick* and
+    cited PID line 117, which is *confirmation candle*. It read as authority,
+    it was wrong, and every guard in this file looked straight past it: the
+    schema table does not cover test docstrings, the criterion check needs a
+    criterion number, and the doctrine check needs a doctrine bullet. The
+    must-not-guess bullets had nothing watching them at all — the one list in
+    the PID this project exists to honour.
+
+    Asked the same way as the doctrine check: only a citation landing in the
+    SAME list is claiming to be that bullet, so one pointing elsewhere is
+    citing something else and is left alone.
+    """
+    pid = _pid_lines()
+    runs = _list_runs(pid)
+    targets = _must_not_guess_lines(pid)
+    assert len(targets) >= 4, "the must-not-guess bullets were not found: %s" % targets
+
+    wrong = []
+    for path in _repository_files():
+        enclosing = ""
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        ):
+            if line.lstrip().startswith("def "):
+                enclosing = _spoken(line)
+            for citation, segment in _citation_segments(line):
+                cited = _cited_numbers(citation.group(1))
+                for phrase, target in targets.items():
+                    if phrase not in segment and phrase not in enclosing:
+                        continue
+                    if target in cited:
+                        continue
+                    run = _run_containing(runs, target)
+                    if any(_run_containing(runs, other) == run for other in cited):
+                        wrong.append(
+                            "%s:%d names %r (PID line %d) but cites %s"
+                            % (
+                                path.relative_to(REPO_ROOT),
+                                number,
+                                phrase,
+                                target,
+                                sorted(cited),
+                            )
+                        )
+    assert not wrong, "\n".join(wrong)
+
+
+def test_that_must_not_guess_check_catches_the_citation_it_was_written_for():
+    """Non-vacuity: assembled here rather than quoted, so this file stays clean.
+
+    The wrong citation was live in ``tests/test_ambiguity.py``: a docstring
+    about *large wick* citing the *confirmation candle* line. Writing it out
+    verbatim would put a wrong citation in a file this very check runs over, so
+    the line is built from the resolved numbers instead.
+    """
+    pid = _pid_lines()
+    runs = _list_runs(pid)
+    targets = _must_not_guess_lines(pid)
+    own = targets["large wick"]
+    neighbour = targets["confirmation candle"]
+    assert own != neighbour
+    assert _run_containing(runs, own) == _run_containing(runs, neighbour)
+
+    # The shape it actually had: the phrase in the enclosing function NAME,
+    # the citation in the docstring line beneath it. The first version of this
+    # check read only the citation's own line and passed on exactly this.
+    definition = "def test_%s_is_parameterised_not_rejected():" % (
+        "large wick".replace(" ", "_")
+    )
+    enclosing = _spoken(definition)
+    assert "large wick" in enclosing
+
+    line = '    """PID line %d names it; PID line 242 depends on it."""' % neighbour
+    detected = False
+    for citation, segment in _citation_segments(line):
+        cited = _cited_numbers(citation.group(1))
+        named = "large wick" in segment or "large wick" in enclosing
+        detected |= named and own not in cited and _run_containing(
+            runs, own
+        ) in [_run_containing(runs, other) for other in cited]
+    assert detected, "the check stopped seeing a phrase beside a wrong citation"
+
+
+def test_every_single_line_citation_points_at_a_real_pid_line():
+    """The one check that covers EVERY citation, not the ones with a claim.
+
+    The content checks above only fire where the text makes a claim they can
+    recognise — a named acceptance criterion, a restated doctrine bullet, a
+    schema property with a declared meaning. That is by design (an expectation
+    table nobody maintains is worse than none) but it leaves most citations
+    checked by nothing, which is how "PID line 117" stood on a test about
+    *large wick* while 117 is *confirmation candle*.
+
+    This asks the one question that needs no expectation and holds for all of
+    them: does the line exist, and does it say anything? It is what catches the
+    whole class of decay where PID.md is re-paragraphed and hundreds of
+    citations slide onto blank lines while every test stays green.
+
+    Ranges are excluded deliberately: "PID lines 43-55" names a passage, and a
+    passage properly contains blank lines.
+    """
+    pid = _pid_lines()
+    wrong = []
+    checked = 0
+    for path in _repository_files():
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        ):
+            for citation in _CITATION.finditer(line):
+                for cited in _cited_items(citation.group(1)):
+                    checked += 1
+                    if not 1 <= cited <= len(pid) or not pid[cited - 1].strip():
+                        wrong.append(
+                            "%s:%d cites PID line %d, which is %s"
+                            % (
+                                path.relative_to(REPO_ROOT),
+                                number,
+                                cited,
+                                "past the end of PID.md"
+                                if not 1 <= cited <= len(pid)
+                                else "blank",
+                            )
+                        )
+    assert not wrong, "\n".join(wrong)
+    assert checked > 500, (
+        "only %d single-line citations were seen; the citation pattern has "
+        "stopped matching the repository" % checked
+    )
+
+
+def test_the_citation_guard_sees_every_form_the_repository_writes():
+    """Non-vacuity for the widening, and a record of what is NOT asserted.
+
+    Thirty-six citations used a form the guard's pattern could not match. This
+    proves each of those forms is now seen, and states plainly how far the
+    checks above go — because the honest answer is "not to every citation", and
+    a guard that leaves that unsaid is the overstated kind this repository
+    refuses to ship.
+
+    WHAT IS CHECKED, AND FOR HOW MANY. Every single-line citation in the
+    repository is checked to point at a real, non-blank PID line (the test
+    above, several hundred of them). On top of that, three CONTENT checks fire
+    where the text makes a claim they can recognise: a named acceptance
+    criterion, a restated doctrine bullet, and a schema property with a
+    declared meaning. Those together are a minority of citations, and pushing
+    them further would mean a per-site expectation table for prose — which is
+    the thing the doctrine-restatement check was deliberately written to avoid
+    needing. The decision is: keep the universal structural check universal,
+    keep the content checks table-free, and do not add a table that would rot.
+    """
+    for form in ("PID line 39", "PID lines 110-120", "PID.md:39", "PID.md line 55",
+                 "PID.md lines 104-105", "PID 242"):
+        match = _CITATION.search(form)
+        assert match is not None, form
+        assert _cited_numbers(match.group(1)), form
+
+    # And the forms that are NOT citations must stay uncaught, or the guard
+    # starts asserting about prose that never claimed a line.
+    for text in ("the PID says", "PID.md is the ruling", "PIDs generally"):
+        assert _CITATION.search(text) is None, text
 
 
 def test_the_widened_citation_guard_would_catch_the_errors_it_was_widened_for():

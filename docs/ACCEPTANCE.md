@@ -4,7 +4,7 @@ Presentation target: **`FUNCTIONAL_ONLY`** (`PID.md:11`). The PID's explicit
 non-goals include dashboards/UI (`PID.md:275`), so there is no browser surface
 and no browser-verification gate applies. Evidence here is mechanical.
 
-Full suite: **841 passed** — pinned by
+Full suite: **869 passed** — pinned by
 `tests/test_boot.py::test_the_acceptance_record_reports_the_suite_it_actually_has`,
 so a stale number here fails rather than waiting for an audit. `hsa boot` reports
 `17 artifacts declared: 17 loaded, 0 required missing, 0 optional absent`.
@@ -15,7 +15,7 @@ so a stale number here fails rather than waiting for an audit. `hsa boot` report
 |---|---|---|
 | 1 | load durable doctrine without Matt re-explaining it | `hsa boot` (exit 0, 17/17); `docs/boot-manifest.json`; `tests/test_boot.py` (53), which now also asserts `docs/BOOT.md`'s sample output against a live run |
 | 2 | ingest a realistic raw strategy description | `strategies/*/*/source.txt` driven through `hsa intake`; `tests/test_intake.py` (31) |
-| 3 | identify ambiguity rather than guessing | `docs/AMBIGUITY-POLICY.md`; `tests/test_ambiguity.py` (90). Five directions proven — Example A's first-pass source was **refused** (exit 4) for "strong trend"/"clean breakout"; Example B's terms were **parameterised** with attribution; and a ruled term whose context re-bases it (*"large wick relative to the recent average"*, *"twice the 14-period ATR"*) is **refused** rather than resolved onto a basis the source displaced. and a ruled term whose own wildcard slot holds unresolved language (*"a large **near resistance** wick"*) is **refused** rather than resolving over the top of it, which is the direction a third audit found open; and a ruled term whose own **literal** phrase collides with a refusal (*"a no-wick **close to resistance**"*, where `no_wick_candle` and `near_resistance` both claim the word *close*) is **refused**, with the refusal reported on its own terms — overlap resolution decides which term parameterises and is not allowed to decide that the loser was never said (`term_match_policy.overlap_resolution`). That last one is asserted over a corpus generated from the declared patterns rather than a written list of sources, and is checked for vacuity by re-arming the defect. A resolution reports `hsa_invented_basis: false` and `source_basis_agreement: "NOT_VERIFIED"` beside the scan that was actually run; it does not emit `hsa_guessed`, which claimed more than was checked |
+| 3 | identify ambiguity rather than guessing | `docs/AMBIGUITY-POLICY.md`; `tests/test_ambiguity.py` (113). Five directions proven — Example A's first-pass source was **refused** (exit 4) for "strong trend"/"clean breakout"; Example B's terms were **parameterised** with attribution; and a ruled term whose context re-bases it (*"large wick relative to the recent average"*, *"twice the 14-period ATR"*) is **refused** rather than resolved onto a basis the source displaced; and a ruled term whose own wildcard slot holds unresolved language (*"a large **near resistance** wick"*) is **refused** rather than resolving over the top of it, which is the direction a third audit found open; and a ruled term whose own **literal** phrase collides with a refusal (*"a no-wick **close to resistance**"*, where `no_wick_candle` and `near_resistance` both claim the word *close*) is **refused**, with the refusal reported on its own terms — overlap resolution decides which term parameterises and is not allowed to decide that the loser was never said (`term_match_policy.overlap_resolution`). and a ruled term whose match runs across a **sentence boundary** (*"a valid **m.a** breakout"*, where a dotted abbreviation was read as a full stop) is **refused and reported** rather than discarded, which is the direction a fifth audit found open and the last of the three rules in `term_match_policy` that could stop a recognised match resolving. Those are asserted over corpora generated from the declared patterns rather than a written list of sources, and each is checked for vacuity by re-arming the defect. The general statement is enforced structurally as well as asserted: every recognised match leaves the scan carrying one declared reason it was accounted for, checked against the findings actually emitted, and there is no reason meaning "dropped" — a sixth deletion path raises `UnreportedMatchError` instead of drafting at exit 0. A resolution reports `hsa_invented_basis: false` and `source_basis_agreement: "NOT_VERIFIED"` beside the scan that was actually run; it does not emit `hsa_guessed`, which claimed more than was checked |
 | 4 | decompose into independent atomic strategies | `catalogue/atomic/` (11 entries); `tests/test_catalogue.py` (149). Atomics cannot reference peers — structurally impossible in `contracts/atomic_strategy.schema.json` |
 | 5 | construct an explicit chain using canonical primitives | Example A `CONTEXT_TRIGGER`, Example B `SEQUENCE`; `tests/test_semantics.py` (94). Per-input reason attribution (`PID.md:80`) is now bound mechanically: every `reason_fields` entry must name a chain `input_id` and a field that input's atomic emits, or a field the package's `output_contract` declares |
 | 6 | assign semantic timeframe roles | both packages' `timeframe_roles`; roles are assignments, not universal timeframes (`PID.md:93`) |
@@ -92,10 +92,22 @@ derivation produces a valid 1.1.0 with `supersedes` and correctly dropped gate
 evidence, in-place mutation is refused, and `1.0.0/` is asserted
 **byte-identical** afterwards by SHA-256.
 
-Two forward invariants keep this from decaying into an excuse: the suite fails
-the moment any package is marked promoted without `CER_LIVE` promotion
-evidence, and any superseding version the inventory ever holds must be a
-governed derivation.
+Two forward invariants keep this from decaying into an excuse, and they are in
+different states, which this record now says rather than presenting both as
+live:
+
+- **promotion is evidenced.** The predicate — a package claiming a
+  promotion-proving status carries `CER_LIVE` promotion evidence, and any
+  promotion evidence at all is `CER_LIVE` — is exercised directly against
+  constructed in-memory packages, and then swept over the real inventory. Over
+  the inventory alone it executed no assertion at all (1.0.0 is a `CANDIDATE`
+  with no promotion evidence, so both branches are skipped), and it was
+  presented here as an active guard while nothing it asserts had ever run.
+- **any superseding version is a governed derivation.** Still **dormant by
+  design**: the inventory holds no superseding version, so the loop body does
+  not execute. The test declares that in its own docstring and is written now
+  so the rules a derived version must meet are on the record before anyone
+  derives one. It gains teeth the day a real 1.1.0 lands, without a rewrite.
 
 This is a **product-authority** matter, not an engineering one. If a second
 inventory directory is wanted before CER is live, someone holding product

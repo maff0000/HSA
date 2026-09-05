@@ -40,6 +40,7 @@ from hsa.intake.analyser import (
     Analysis,
     ContestedMatchFinding,
     RebasedFinding,
+    StraddledMatchFinding,
     TermFinding,
     UnknownFinding,
     UnruledSlotFinding,
@@ -343,6 +344,44 @@ def _unresolved_from_contested(
     }
 
 
+def _unresolved_from_straddled(
+    finding: StraddledMatchFinding, analysis: Analysis
+) -> dict:
+    """A recognised term match that ran across a sentence boundary.
+
+    ``source_language`` quotes the STRADDLING SPAN — the whole thing, boundary
+    included — because that span is the only place a reader can see what
+    happened. Either half of it reads as ordinary prose, which is exactly how
+    this hid: "I only take a valid m.a breakout of the range" looks fine, and
+    the only visible symptom was a PID line 118 refusal that silently did not
+    happen.
+    """
+    policy = analysis.lexicon.sentence_boundary_policy
+    term = finding.term
+    resolution = policy["resolution_needed"]
+    fields = {
+        "phrase": " ".join(finding.occurrences[0].text.split()),
+        "term_label": term.label,
+        "term_id": term.term_id,
+        "measurement_basis": term.measurement_basis or "",
+        "context_text": finding.context_text,
+        "terminators": finding.terminators,
+    }
+    return {
+        "item_id": finding.item_id,
+        "source_language": finding.occurrences[0].text,
+        "location": finding.location,
+        "why_unresolved": policy["why_unresolved_template"].format(**fields),
+        "blocks": list(policy["blocks"]),
+        "severity": policy["severity"],
+        "resolution_needed": {
+            "kind": resolution["kind"],
+            "description": resolution["description_template"].format(**fields),
+            "responsible": resolution["responsible"],
+        },
+    }
+
+
 def _unresolved_from_term(finding: TermFinding) -> dict:
     term = finding.term
     item: dict[str, Any] = {
@@ -388,8 +427,15 @@ def unresolved_items(analysis: Analysis) -> list[dict]:
 
     Ruled refusals, then re-based terms, then terms whose wildcard slot holds
     unresolved language, then terms whose ruled phrase collides with one, then
-    unknowns. Order is fixed so two runs over the same source produce
-    byte-identical documents apart from the timestamp.
+    terms whose match ran across a sentence boundary, then unknowns. Order is
+    fixed so two runs over the same source produce byte-identical documents
+    apart from the timestamp.
+
+    Every kind of finding the analyser can emit appears here. That is not a
+    convention: ``analyse`` refuses to return an Analysis in which a
+    recognised match reached the end of the scan without landing in one of
+    these collections, so a finding kind missing from this list would show up
+    as an item the caller never sees rather than as a term that vanished.
     """
     items = [_unresolved_from_term(finding) for finding in analysis.refused]
     items.extend(
@@ -403,6 +449,10 @@ def unresolved_items(analysis: Analysis) -> list[dict]:
     items.extend(
         _unresolved_from_contested(finding, analysis)
         for finding in analysis.contested_findings
+    )
+    items.extend(
+        _unresolved_from_straddled(finding, analysis)
+        for finding in analysis.straddled_findings
     )
     items.extend(
         _unresolved_from_unknown(finding, analysis)

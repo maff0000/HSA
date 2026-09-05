@@ -21,9 +21,10 @@ import pytest
 from hsa.contracts import validate_document
 from hsa.intake import build_request, intake, load_lexicon
 from hsa.intake import analyser as analyser_module
+from hsa.intake import lexicon as lexicon_module
 from hsa.intake.analyser import analyse
 from hsa.intake.documents import unresolved_items
-from hsa.intake.errors import LexiconError
+from hsa.intake.errors import LexiconError, UnreportedMatchError
 from hsa.intake.lexicon import PARAMETERISE, REFUSE
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -102,22 +103,43 @@ def test_policy_document_and_lexicon_agree_on_every_ruling(lexicon):
 # --- parameterise: the measurement basis is known ----------------------------
 
 
-def test_parameterised_terms_declare_a_basis_and_bounded_parameters(lexicon):
-    for term in lexicon.terms:
-        if term.disposition != PARAMETERISE:
+def test_parameterised_terms_declare_a_basis_and_bounded_parameters():
+    """PID line 140: default, allowed range and units, all present.
+
+    Read off the lexicon FILE rather than the loaded object, deliberately. The
+    loader already refuses a PARAMETERISE term missing any of these, so taking
+    the ``lexicon`` fixture meant a violation could never reach this test's
+    body: ``load_lexicon()`` would raise in fixture setup, every test in the
+    module would report an ERROR, and this one — the test actually named for
+    the rule — would never run. A test that cannot fail on its own subject is
+    not checking it; it is restating a guarantee something else already made.
+
+    Against the file it fails, once, naming the term and the missing key.
+    """
+    declared = json.loads(
+        (REPO_ROOT / "hsa" / "intake" / "lexicon.json").read_text(encoding="utf-8")
+    )["terms"]
+    checked = 0
+    for entry in declared:
+        if entry.get("disposition") != PARAMETERISE:
             continue
-        assert term.measurement_basis
-        assert term.basis_rationale
-        assert term.parameters
-        for param in term.parameters:
-            # PID line 140: default, allowed range and units, all present.
-            assert param["default"] is not None
-            assert param["units"]
-            assert "allowed_range" in param or "allowed_values" in param
+        where = entry.get("term_id")
+        assert entry.get("measurement_basis"), where
+        assert entry.get("basis_rationale"), where
+        assert entry.get("parameters"), where
+        for param in entry["parameters"]:
+            assert param.get("default") is not None, (where, param.get("name"))
+            assert param.get("units"), (where, param.get("name"))
+            assert "allowed_range" in param or "allowed_values" in param, (
+                where,
+                param.get("name"),
+            )
+            checked += 1
+    assert checked, "no PARAMETERISE parameter was checked"
 
 
 def test_large_wick_is_parameterised_not_rejected():
-    """PID line 117 names it; PID line 242 depends on it. Both hold.
+    """PID line 114 names it; PID line 242 depends on it. Both hold.
 
     The measurement basis (wick length over candle range) is known, so only
     the threshold was missing — and a missing threshold is a parameter.
@@ -523,22 +545,58 @@ def test_the_attachment_ruling_is_declared_data_not_code(lexicon):
         assert construction in not_attached, construction
 
 
-def test_a_parameterise_pattern_without_a_declared_slot_is_refused_at_load(tmp_path):
-    """The slot must be declared, or Blocker 2 comes straight back.
-
-    A PARAMETERISE pattern with a wildcard but no ``basis_slot`` group would
-    leave the guard unable to see inside its own match, and a re-basing landing
-    in the wildcard would resolve silently. That has to fail the load, not
-    degrade quietly.
-    """
+def _lexicon_with_parameterise_pattern(tmp_path, name: str, pattern: str):
+    """The advisory fixture with its PARAMETERISE pattern replaced."""
     source = json.loads(
         (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
     )
     term = next(t for t in source["terms"] if t["disposition"] == PARAMETERISE)
-    term["pattern"] = term["pattern"].replace("(?P<basis_slot>", "(?:")
-    broken = tmp_path / "no_slot.json"
+    term["pattern"] = pattern
+    broken = tmp_path / name
     broken.write_text(json.dumps(source), encoding="utf-8")
-    with pytest.raises(LexiconError, match="basis_slot"):
+    return broken
+
+
+def test_a_parameterise_pattern_with_an_undeclared_wildcard_is_refused_at_load(
+    tmp_path,
+):
+    """A wildcard the analyser cannot see is Blocker 2, re-armed.
+
+    Un-naming the group leaves the wildcard exactly where it was and takes away
+    the only thing that tells the analyser where it is. The load fails on the
+    WILDCARD guard, and this test says so — see the test below for why that
+    distinction is not pedantry.
+    """
+    broken = _lexicon_with_parameterise_pattern(
+        tmp_path,
+        "undeclared_wildcard.json",
+        r"\b(?:large|big)(?:(?:[ -][a-z0-9.%]+){0,3})[ -]wicks?\b",
+    )
+    with pytest.raises(LexiconError, match="outside the declared"):
+        load_lexicon(broken)
+
+
+def test_a_parameterise_pattern_without_a_declared_slot_is_refused_at_load(tmp_path):
+    """The slot must be DECLARED even by a pattern with no wildcard at all.
+
+    Test-integrity finding A2: this test used to un-name the group on a pattern
+    that still contained a wildcard, so the wildcard guard fired first and its
+    message happens to contain the word "basis_slot" — which is all the old
+    ``match=`` asked for. Disabling the guard this test is named after left the
+    whole suite green. It was a passing test for an unexercised guard, and that
+    guard is load-bearing: it blocked the fourth audit's first bypass attempt.
+
+    So the pattern here has NO wildcard for the other guard to catch. It is
+    literal end to end, it reaches the slot guard, and the ``match=`` is the
+    slot guard's own words rather than a substring both messages share. The
+    rule being asserted is the real one: a PARAMETERISE term declares where its
+    modifier slot is, because the guard that reads inside a term's own match
+    has no way to find it otherwise.
+    """
+    broken = _lexicon_with_parameterise_pattern(
+        tmp_path, "no_slot.json", r"\blarge wicks?\b"
+    )
+    with pytest.raises(LexiconError, match="must declare the named group"):
         load_lexicon(broken)
 
 
@@ -665,6 +723,24 @@ def test_the_guard_does_not_claim_to_be_complete(lexicon):
     limits = lexicon.basis_qualifier_policy["limits"].lower()
     assert "not proven" in limits or "passes it" in limits
     assert "surface" in limits
+
+
+def test_the_wildcard_guard_does_not_claim_to_be_complete():
+    """The same discipline, applied to the guard that WAS overstating itself.
+
+    ``_wildcards_outside_slot`` claimed to find "every construct that can match
+    an unenumerated word" and tested a fixed list of spellings; ``[a-y ]`` and
+    ``[\\x61-\\x7a ]`` walked straight past it. The implementation is fixed —
+    it asks a class what it matches — and the claim is fixed too, because the
+    new implementation is still not a proof about arbitrary regular
+    expressions and must not read like one.
+    """
+    doc = lexicon_module._wildcards_outside_slot.__doc__ or ""
+    assert "does NOT claim" in doc
+    assert "ALPHANUMERIC" in doc.upper()
+    # The limit is a declared number, not a tuned constant hidden in a branch.
+    assert isinstance(lexicon_module._ENUMERATED_CLASS_LIMIT, int)
+    assert lexicon_module._ENUMERATED_CLASS_LIMIT > 0
 
 
 def test_the_policy_document_and_the_guard_describe_the_same_system():
@@ -939,33 +1015,113 @@ def test_a_refusal_sharing_the_terms_head_noun_is_not_hidden_either(lexicon):
     assert [occupant.identity for occupant in occupants] == ["confirmation_candle"]
 
 
+#: The token class the two fixture lexicons declare inside their slot. Widened
+#: per terminator so a slot CAN swallow one and the analyser rule is what
+#: decides the outcome — see ``_boundary_lexicon``.
+_FIXTURE_SLOT_CLASS = "[a-z0-9.%]"
+
+
+def _boundary_lexicon(tmp_path, fixture: str, terminator: str):
+    """A fixture lexicon whose slot can actually swallow ``terminator``.
+
+    This is the whole of test-integrity finding A1. The previous version of the
+    test below ran the SHIPPED lexicon and was carried entirely by pattern
+    data: ``large_wick``'s slot class cannot match ``!``, ``?`` or ``;``, so
+    ``pattern.search`` returned None and the analyser rule was never consulted.
+    Mutating ``_is_terminator`` so those three stopped being terminators left
+    the whole suite green. The test asserted the right thing about a source
+    that could not reach the code it was asserting about.
+
+    So the slot is widened here, per terminator, and the test asserts FIRST
+    that the pattern really does reach across. What decides the outcome after
+    that is the analyser, which is the claim being made.
+    """
+    source = json.loads((FIXTURES / fixture).read_text(encoding="utf-8"))
+    widened = _FIXTURE_SLOT_CLASS[:-1] + terminator + "]"
+    for term in source["terms"]:
+        term["pattern"] = term["pattern"].replace(_FIXTURE_SLOT_CLASS, widened)
+    target = tmp_path / ("boundary_%d_%s" % (ord(terminator), fixture))
+    target.write_text(json.dumps(source), encoding="utf-8")
+    return load_lexicon(target)
+
+
 @pytest.mark.parametrize("terminator", list(".!?;"))
-def test_no_term_match_may_span_a_sentence_boundary(terminator, lexicon):
-    source = "XAUUSD 15m. I want a large trade%s some wick setups only." % terminator
-    analysis = _analyse_text(source, lexicon)
+def test_no_term_match_may_span_a_sentence_boundary(terminator, tmp_path):
+    """Every declared terminator, actually reaching the analyser rule.
+
+    Three assertions, and the first is what makes the other two mean anything:
+    the pattern DOES match across the boundary, so the analyser is the thing
+    deciding, not the character class.
+    """
+    loose = _boundary_lexicon(tmp_path, "lexicon_collision.json", terminator)
+    source = "i want a large trade%s some wick setups only." % terminator
+    analysis = analyse(source, loose)
+
+    raw = loose.term("large_wick").pattern.search(analysis.normalised)
+    assert raw is not None, "this test needs a pattern that DOES reach across"
+    assert ("trade" + terminator) in raw.group(0), (terminator, raw.group(0))
+
+    # It is not accepted as a ruling: it suppresses nothing and resolves
+    # nothing, so everything on the far side of the boundary is still scanned.
     assert not analysis.term_findings, terminator
-    assert _refuses(source, lexicon), terminator
+    # And it is not deleted either. That second half is R8: for four audits
+    # this was a bare ``continue`` and the recognised term left no trace.
+    assert [f.term.term_id for f in analysis.straddled_findings] == [
+        "large_wick"
+    ], terminator
+    assert _refuses(source, loose), terminator
 
 
 def test_the_sentence_boundary_rule_does_not_depend_on_the_pattern(lexicon):
     """The rule is enforced on the MATCH, which is what makes it structural.
 
-    Tightening the four shipped patterns so their slots cannot consume a full
-    stop protects the four patterns that exist today. This test runs a lexicon
-    whose slot is deliberately NOT tightened — the advisory test fixture still
-    declares the original ``[a-z0-9.%]`` token class — and shows the pattern
-    matching straight across a full stop while the analyser still refuses to
-    accept it. A term declared tomorrow with a loose slot is covered by the
-    same rule, without anybody remembering this.
+    Tightening the shipped patterns so their slots cannot consume a full stop
+    protects the patterns that exist today. This test runs a lexicon whose slot
+    is deliberately NOT tightened — the advisory test fixture still declares
+    the original ``[a-z0-9.%]`` token class — and shows the pattern matching
+    straight across a full stop while the analyser still declines to accept it.
+    A term declared tomorrow with a loose slot is covered by the same rule,
+    without anybody remembering this.
     """
     loose = load_lexicon(FIXTURES / "lexicon_advisory.json")
     source = "I want a large trade. some wick setups only."
-    normalised = analyse(source, loose).normalised
-    raw = loose.term("large_wick").pattern.search(normalised)
+    analysis = analyse(source, loose)
+    raw = loose.term("large_wick").pattern.search(analysis.normalised)
     assert raw is not None, "this test needs a pattern that DOES reach across"
     assert "trade." in raw.group(0), raw.group(0)
 
-    assert not analyse(source, loose).term_findings
+    assert not analysis.term_findings
+    assert [f.term.term_id for f in analysis.straddled_findings] == ["large_wick"]
+
+
+def test_a_straddling_match_is_reported_and_not_merely_dropped():
+    """R8, stated once: refusing to READ it is not permission to DELETE it.
+
+    The advisory fixture rules the boundary case ADVISORY rather than BLOCKING,
+    so this also proves the emitted item is built from the DECLARED severity
+    rather than a constant in code — the same way the slot and overlap items
+    are.
+    """
+    loose = load_lexicon(FIXTURES / "lexicon_advisory.json")
+    assert loose.sentence_boundary_policy["severity"] == "ADVISORY"
+    source = "I want a large trade. some wick setups only."
+    result = intake(
+        build_request(source, "TRADER_EXPLANATION", "unit test"),
+        lexicon=loose,
+        generated_at_utc=STAMP,
+    )
+    assert result.sufficiently_defined, "ADVISORY does not block"
+    item = next(
+        item
+        for item in result.document["advisory_items"]
+        if item["item_id"] == "straddled_large_wick"
+    )
+    # The reader is shown the straddle itself. Either half of it reads as
+    # ordinary prose, which is exactly how this stayed invisible.
+    assert "trade. some wick" in " ".join(item["source_language"].split())
+    assert "sentence boundary" in item["why_unresolved"]
+    assert item["severity"] == "ADVISORY"
+    assert item["resolution_needed"]["responsible"] == "MATT"
 
 
 def test_a_decimal_point_is_not_a_sentence_boundary(lexicon):
@@ -1006,6 +1162,123 @@ def test_a_term_pattern_may_not_hide_a_wildcard_outside_its_declared_slot(tmp_pa
     broken.write_text(json.dumps(source), encoding="utf-8")
     with pytest.raises(LexiconError, match="outside the declared"):
         load_lexicon(broken)
+
+
+#: Character classes that accept a run of the alphabet without spelling any of
+#: the tokens the guard used to look for. Every one of these loaded cleanly,
+#: and with one of them in a pattern the analyser silently swallows markers.
+#: Latent, not live — no shipped pattern does this — but the guard's own
+#: docstring claimed to find "every construct that can match an unenumerated
+#: word", and it did not.
+_WILDCARD_SPELLINGS = (
+    r"[a-y ]",
+    r"[b-z ]",
+    r"[\x61-\x7a ]",
+    r"[a-z ]",
+    r"[^0-9]",
+)
+
+#: And the classes a term pattern legitimately uses, which must keep loading.
+#: A class that names a few characters is an enumeration, not a wildcard.
+_ENUMERATED_SPELLINGS = (r"[ -]", r"[.]", r"[ ]")
+
+
+@pytest.mark.parametrize("klass", _WILDCARD_SPELLINGS)
+def test_a_wildcard_spelled_any_way_at_all_is_refused_at_load(klass, tmp_path):
+    """The guard asks the class what it MATCHES, not how it is written.
+
+    Test-integrity finding S2. Checking a fixed list of spellings meant the
+    guard could be walked around by writing the same wildcard differently, and
+    the docstring claiming completeness made that worse than saying nothing.
+    """
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["terms"][0]["pattern"] = (
+        r"\b(?:large|big)(?:%s){0,20}[ -]wicks?\b" % klass
+    )
+    broken = tmp_path / ("wildcard_%d.json" % abs(hash(klass)))
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="outside the declared"):
+        load_lexicon(broken)
+
+
+@pytest.mark.parametrize("klass", _ENUMERATED_SPELLINGS)
+def test_an_enumerated_class_is_not_treated_as_a_wildcard(klass, tmp_path):
+    """The other direction: the guard must not refuse the patterns HSA ships.
+
+    Every declared term joins its words with ``[ -]``. A guard that called that
+    a wildcard would refuse the whole lexicon, which is why the threshold is
+    declared as a number rather than tuned until the suite went green.
+    """
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["terms"][0]["pattern"] = (
+        r"\b(?:large|big)(?P<basis_slot>(?:[ -][a-z0-9.%%]+){0,3})%swicks?\b" % klass
+    )
+    ok = tmp_path / ("enumerated_%d.json" % abs(hash(klass)))
+    ok.write_text(json.dumps(source), encoding="utf-8")
+    assert load_lexicon(ok).term("large_wick")
+
+
+#: A pattern that satisfies every OTHER loader guard and still hides a
+#: wildcard: it declares its basis_slot properly, and then runs an undeclared
+#: ``[a-y ]`` past its head noun. The slot guard is satisfied, so the wildcard
+#: guard is the only thing standing between this and a silent resolution.
+_BYPASS_PATTERN = (
+    r"\b(?:large|big)(?P<basis_slot>(?:[ -][a-z0-9.%]+){0,3})"
+    r"[ -]wick(?:[a-y ]){0,30}s?\b"
+)
+
+
+def _bypass_lexicon(tmp_path):
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["terms"][0]["pattern"] = _BYPASS_PATTERN
+    target = tmp_path / "bypass.json"
+    target.write_text(json.dumps(source), encoding="utf-8")
+    return target
+
+
+def test_the_wildcard_guard_is_the_only_thing_stopping_the_bypass(tmp_path):
+    """The bypass shape that no other guard catches, refused at load."""
+    with pytest.raises(LexiconError, match="outside the declared"):
+        load_lexicon(_bypass_lexicon(tmp_path))
+
+
+def test_a_bypassing_wildcard_really_would_have_swallowed_a_marker(
+    tmp_path, monkeypatch
+):
+    """Non-vacuity for S2: the bypass was not merely untidy, it was live.
+
+    With the guard removed, the pattern above loads — it satisfies the
+    slot-declaration guard, so nothing else objects — and the analyser then
+    treats its whole matched span as ruled text, because the wildcard past the
+    head noun is invisible to it. "a large wick healthy pullback" resolves at
+    exit 0 with the unruled marker gone. That is the original defect exactly,
+    reached by spelling a wildcard in a way the guard's fixed list did not
+    name.
+
+    Demonstrated rather than asserted, because it is the claim the tests above
+    rest on: an incomplete guard that CLAIMS completeness is worse than none.
+    """
+    monkeypatch.setattr(
+        lexicon_module, "_check_wildcard_slots", lambda pattern, where: None
+    )
+    loose = load_lexicon(_bypass_lexicon(tmp_path))
+    text = "I enter on a large wick healthy pullback."
+    swallowed = loose.term("large_wick").pattern.search(text.lower())
+    assert swallowed is not None and "healthy" in swallowed.group(0), swallowed
+
+    result = intake(
+        build_request(text, "TRADER_EXPLANATION", "unit test"),
+        lexicon=loose,
+        generated_at_utc=STAMP,
+    )
+    assert result.sufficiently_defined, "the demonstration needs the source to pass"
+    assert "healthy" not in json.dumps(result.document["advisory_items"])
 
 
 #: Everything that can land in a modifier slot: every REFUSE term's own
@@ -1244,24 +1517,44 @@ except ImportError:  # pragma: no cover
 _SLOT_MARK = "\x00"
 
 
+#: How many repetitions of a ``{n,m}`` construct the enumeration spells: none
+#: and one. Stated as a constant because it is a declared BOUND on the corpus,
+#: not an accident, and ``docs/AMBIGUITY-POLICY.md`` cites it when describing
+#: what the corpus is. Two would multiply ``near_resistance`` past any useful
+#: size without reaching a different KIND of source.
+_SPELLED_REPETITIONS = 1
+
+
 def _spell(node, slot_id, limit):
-    """Every string a parsed pattern's literal alternations can spell."""
+    """Every string a parsed pattern's literal alternations can spell.
+
+    A bounded, deterministic SAMPLE of what a pattern matches, not the full
+    language of it — see ``_phrases`` for the three bounds and
+    ``docs/AMBIGUITY-POLICY.md`` for why the claim is worded that way.
+
+    An ``IN`` node spells every LITERAL alternative it lists. It used to spell
+    only the FIRST, which is why the corpus contained zero hyphens: every term
+    pattern joins its words with ``[ -]`` and the corpus only ever said the
+    space form, while the fourth audit's own defect phrasing was hyphenated.
+    A RANGE contributes its first character only, which is the one bound here
+    that is a real loss of coverage rather than a choice about size.
+    """
     out = [""]
     for op, argument in node:
         name = str(op).rsplit(".", 1)[-1]
         if name == "LITERAL":
             out = [prefix + chr(argument) for prefix in out]
         elif name == "IN":
-            char = ""
+            chars: list[str] = []
             for inner_op, inner_arg in argument:
                 inner = str(inner_op).rsplit(".", 1)[-1]
                 if inner == "LITERAL":
-                    char = chr(inner_arg)
-                    break
-                if inner == "RANGE":
-                    char = chr(inner_arg[0])
-                    break
-            out = [prefix + char for prefix in out]
+                    chars.append(chr(inner_arg))
+                elif inner == "RANGE":
+                    chars.append(chr(inner_arg[0]))
+            if not chars:
+                chars = [""]
+            out = [prefix + char for prefix in out for char in chars]
         elif name == "BRANCH":
             spelled = []
             for branch in argument[1]:
@@ -1280,7 +1573,7 @@ def _spell(node, slot_id, limit):
             inner = _spell(body, slot_id, limit)
             spelled = list(out) if low == 0 else []
             repeated = out
-            for _ in range(max(low, 1)):
+            for _ in range(max(low, _SPELLED_REPETITIONS)):
                 repeated = [prefix + tail for prefix in repeated for tail in inner]
             spelled.extend(repeated)
             out = spelled
@@ -1290,7 +1583,23 @@ def _spell(node, slot_id, limit):
 
 
 def _phrases(term, limit=400):
-    """Every phrase ``term``'s pattern matches, slot empty, in a fixed order."""
+    """A bounded sample of the phrases ``term``'s pattern matches, in order.
+
+    Deliberately NOT "every phrase", and the docstring used to say that it was.
+    Three bounds, all of them deterministic:
+
+    * a character RANGE contributes its first character only, so ``[a-z]``
+      spells ``a``;
+    * a repetition spells ``_SPELLED_REPETITIONS`` repetitions and none;
+    * the enumeration stops at ``limit`` phrases per pattern.
+
+    ``near_resistance`` alone can spell more than 25,000 phrases and 400 are
+    taken, so the gap is not marginal. What the sample is FOR is crossing every
+    ruled phrase with every probe at every relative position — a shape of
+    source, not an exhaustive language — and a claim of exhaustiveness it does
+    not meet would be exactly the kind of overstated guard this repository
+    refuses to ship elsewhere. See ``docs/AMBIGUITY-POLICY.md``.
+    """
     parsed = _sre_parser.parse(term.pattern.pattern)
     slot_id = parsed.state.groupdict.get("basis_slot")
     ordered, seen = [], set()
@@ -1368,6 +1677,70 @@ def _collision_corpus(lexicon):
     return corpus
 
 
+#: Dotted tokens that put something a sentence splitter might read as a
+#: terminator INSIDE a ruled phrase. These are not decoration: every one of
+#: them made a term match straddle a boundary and be deleted, and they are the
+#: abbreviations VIDEO_DERIVED and TRADER_EXPLANATION intake actually carries
+#: (PID lines 104-105). "1.5" is here as the control — it was always safe, and
+#: it has to stay safe.
+_DOTTED_TOKENS = ("m.a", "h.4", "4.hour", "vwap.session", "a.m", "1.5")
+
+#: How many of each ruled term's phrases the boundary corpus crosses. The
+#: collision corpus above takes all of them; this one multiplies each phrase by
+#: every dotted token and every terminator at every gap, so it is bounded here
+#: rather than allowed to grow with the lexicon.
+_BOUNDARY_PHRASE_CAP = 4
+
+
+def _boundary_corpus(lexicon):
+    """The collision corpus's blind spot: terminators and dotted tokens.
+
+    The generated corpus said "xauusd 15m. i enter on a <phrase> here." for
+    every phrase and every probe, and inside that template it generated no
+    sentence terminator and no dotted token anywhere near a ruled phrase. That
+    is precisely the region the fifth audit's defect lived in, and it is why a
+    corpus of three thousand sources could not see it.
+
+    So this corpus puts one INSIDE the ruled phrase, at every gap between its
+    words, two ways:
+
+    * a dotted token, which used to make the phrase straddle a boundary that
+      was not there — the entry point for "a valid m.a breakout";
+    * a real terminator, which makes it straddle a boundary that IS there.
+
+    The property asserted over it is the same one: nothing the analyser
+    recognises goes unreported. Both ways of straddling now say so.
+    """
+    families = _probe_families(lexicon)
+    corpus, seen = [], set()
+    for term in lexicon.terms:
+        if term.disposition != PARAMETERISE:
+            continue
+        for phrase in _phrases(term)[:_BOUNDARY_PHRASE_CAP]:
+            words = phrase.split()
+            for _kind, _identity, family_phrases in families:
+                probe = family_phrases[0].split()
+                for gap in range(1, len(words)):
+                    for token in _DOTTED_TOKENS:
+                        placed = words[:gap] + [token] + words[gap:] + probe
+                        source = "xauusd 15m. i enter on a %s here." % " ".join(placed)
+                        if source not in seen:
+                            seen.add(source)
+                            corpus.append(source)
+                    for terminator in lexicon.sentence_terminators:
+                        placed = (
+                            words[:gap]
+                            + [words[gap] + terminator]
+                            + words[gap + 1 :]
+                            + probe
+                        )
+                        source = "xauusd 15m. i enter on a %s here." % " ".join(placed)
+                        if source not in seen:
+                            seen.add(source)
+                            corpus.append(source)
+    return corpus
+
+
 def _covers(spans, start, end) -> bool:
     """Whether ``spans`` covers ``[start, end)`` end to end.
 
@@ -1386,22 +1759,41 @@ def _covers(spans, start, end) -> bool:
 
 
 def _unreported(source: str, lexicon):
-    """Recognised discretionary language that left no trace in the output.
+    """Recognised language that neither resolved nor left a trace in the output.
 
-    A REFUSE term match must appear in the emitted items, always — it is a
-    ruling the lexicon has already made, and there is no reading of "every
-    recognised term is either parameterised or itemised" that lets one vanish.
-    A marker is exempt only when the accepted rulings COVER it end to end,
-    which is the one case where something has genuinely been ruled on.
+    This is the guarantee ``docs/AMBIGUITY-POLICY.md`` makes, checked over one
+    source, and R8 widened it by a word. It used to say "no OVERLAP may leave a
+    recognised term unreported"; it now says NOTHING may, and the difference is
+    the whole reason the sentence-boundary path survived four repairs.
+
+    So all three dispositions are asked about, not two:
+
+    * a REFUSE term match must appear in the emitted items, always — it is a
+      ruling the lexicon has already made, and there is no reading of "every
+      recognised term is either parameterised or itemised" that lets one
+      vanish;
+    * a PARAMETERISE term match must either RESOLVE, or be covered end to end
+      by an accepted ruling, or be reported. This half was missing, and it is
+      exactly the half the fifth audit's ``no_wick_candle`` leak fell through:
+      "a no-wick h.4 confirmation" recognised the term, resolved nothing, and
+      reported nothing, at exit 0;
+    * a marker is exempt only when the accepted rulings COVER it end to end,
+      which is the one case where something has genuinely been ruled on.
     """
     analysis = analyse(source, lexicon)
     emitted = json.dumps(unresolved_items(analysis)).lower()
+    resolved = {finding.term.term_id for finding in analysis.term_findings}
     missing = []
     for term in lexicon.terms:
-        if term.disposition == PARAMETERISE:
-            continue
         for match in term.pattern.finditer(analysis.normalised):
-            if match.end() > match.start() and match.group(0) not in emitted:
+            if match.end() <= match.start():
+                continue
+            if term.disposition == PARAMETERISE:
+                if term.term_id in resolved:
+                    continue
+                if _covers(analysis.ruled_spans, match.start(), match.end()):
+                    continue
+            if match.group(0) not in emitted:
                 missing.append((term.term_id, match.group(0)))
     for marker in lexicon.markers:
         for match in marker.pattern.finditer(analysis.normalised):
@@ -1428,18 +1820,31 @@ def test_the_generated_corpus_actually_spells_the_declared_patterns(lexicon):
     # The phrasing the fourth audit found must be in there without anybody
     # having written it down: it is one of the things no_wick_candle spells.
     assert "no wick close" in _phrases(lexicon.term("no_wick_candle"))
+    markers = {marker.marker_id: marker for marker in lexicon.markers}
+    marker_phrases = 0
     for kind, identity, phrases in _probe_families(lexicon):
         assert phrases, (kind, identity)
         for phrase in phrases:
-            assert (
-                lexicon.term(identity).pattern.fullmatch(phrase)
-                if kind == "REFUSE_TERM"
-                else True
-            ), (identity, phrase)
+            # Both halves are checked. The MARKER half used to evaluate a bare
+            # `True` — 109 of the 736 iterations asserted nothing at all, in a
+            # test whose docstring promises the generator is checked before
+            # anything is concluded from it.
+            if kind == "REFUSE_TERM":
+                pattern = lexicon.term(identity).pattern
+            else:
+                pattern = markers[identity].pattern
+                marker_phrases += 1
+            assert pattern.fullmatch(phrase), (kind, identity, phrase)
+    assert marker_phrases, "no marker phrase was enumerated, so none was checked"
     corpus = _collision_corpus(lexicon)
     assert len(corpus) > 2000
     # The collision the fourth audit found is generated, not written down.
     assert any("no wick close to resistance" in source for source in corpus)
+    # And the hyphen forms, which the corpus contained NONE of while every
+    # term pattern joins its words with [ -] and the fourth audit's own defect
+    # phrasing was hyphenated. An IN node now spells all its alternatives.
+    assert any("no-wick" in source for source in corpus)
+    assert any("large-wick" in source for source in corpus)
 
 
 def test_no_overlap_leaves_a_refuse_term_or_a_marker_unreported(lexicon):
@@ -1490,6 +1895,275 @@ def test_that_invariant_test_is_not_vacuous(lexicon, monkeypatch):
     assert _unreported(
         "XAUUSD 15m. I enter on a no-wick close to resistance.", lexicon
     )
+
+
+def test_the_boundary_corpus_generates_the_region_the_blocker_lived_in(lexicon):
+    """The collision corpus's blind spot, checked before it is relied on.
+
+    The generated corpus produced no sentence terminator and no dotted token
+    anywhere near a ruled phrase, which is why three thousand sources could not
+    see a defect that needed one. This asserts the second corpus actually puts
+    them there — including the exact shape the fifth audit reported, generated
+    rather than written down.
+    """
+    corpus = _boundary_corpus(lexicon)
+    assert len(corpus) > 500
+    assert any("m.a" in source for source in corpus)
+    assert any("1.5" in source for source in corpus)
+    for terminator in lexicon.sentence_terminators:
+        assert any(
+            ("wick" + terminator) in source or ("wicks" + terminator) in source
+            for source in corpus
+        ), terminator
+    # The dotted token sits INSIDE the ruled phrase, which is what made the
+    # match straddle. A token merely next to the phrase would prove nothing.
+    assert any("no m.a wick" in source or "large m.a wick" in source
+               for source in corpus)
+
+
+def test_nothing_straddling_a_sentence_boundary_goes_unreported(lexicon):
+    """R8's invariant, over the boundary corpus.
+
+    Same property as the collision corpus asserts, over the sources that
+    corpus could not generate: for every ruled phrase, every probe, every
+    dotted token and every terminator placed inside it, nothing the analyser
+    recognises goes unreported.
+    """
+    for source in _boundary_corpus(lexicon):
+        missing = _unreported(source, lexicon)
+        assert not missing, (source, missing)
+
+
+def _rearm_the_discard(monkeypatch):
+    """Put the analyser back exactly as it shipped when the fifth audit ran.
+
+    Two things, and both were needed for the defect:
+
+    * ``_is_terminator`` exempted only digit-``.``-digit, so "m.a", "h.4" and
+      "a.m" each read as a sentence ending mid-word;
+    * a boundary-crossing match was discarded with no finding of any kind.
+
+    The second is re-armed by dropping the straddled findings on the way out.
+    The choke point would stop that on its own — which is the point of the
+    test above — so it is disabled here too, because what is being measured
+    here is whether the CORPUS can see the defect, not whether the choke point
+    can.
+    """
+    original_analysis = analyser_module.Analysis
+
+    def without_straddled(**kwargs):
+        kwargs["straddled_findings"] = ()
+        return original_analysis(**kwargs)
+
+    def decimal_only(norm, index, stops):
+        char = norm[index]
+        if char not in stops:
+            return False
+        if char != ".":
+            return True
+        before = norm[index - 1] if index else ""
+        after = norm[index + 1] if index + 1 < len(norm) else ""
+        return not (before.isdigit() and after.isdigit())
+
+    monkeypatch.setattr(analyser_module, "Analysis", without_straddled)
+    monkeypatch.setattr(analyser_module, "_is_terminator", decimal_only)
+    monkeypatch.setattr(
+        analyser_module,
+        "_verify_every_recognised_match_is_reported",
+        lambda *args, **kwargs: None,
+    )
+
+
+def test_that_boundary_invariant_test_is_not_vacuous(lexicon, monkeypatch):
+    """Re-arm the discard and watch the boundary corpus catch it."""
+    _rearm_the_discard(monkeypatch)
+    caught = [
+        source for source in _boundary_corpus(lexicon) if _unreported(source, lexicon)
+    ]
+    assert caught, "the re-armed discard went undetected"
+    # And specifically the phrasing the fifth audit reported, not merely
+    # something: a PID line 118 must-not-guess phrase, gone without trace.
+    assert _unreported(
+        "XAUUSD 15m breakout rules. I only take a valid m.a breakout of the range.",
+        lexicon,
+    )
+
+
+def test_the_choke_point_raises_when_a_recognised_match_is_dropped(
+    lexicon, monkeypatch
+):
+    """The structural half: deleting a recognised match is no longer possible.
+
+    R6 closed the wildcard-slot path, R7 the overlap path, and each left
+    another, because the general statement was never enforced anywhere. It is
+    now: every recognised match carries one declared reason out of the scan,
+    and the reason is checked against the findings actually emitted.
+
+    So this drops the straddled findings — the exact shape of the shipped
+    defect — WITHOUT disabling the check, and the analyser raises instead of
+    quietly drafting. A sixth deletion path added tomorrow lands here.
+    """
+    original_analysis = analyser_module.Analysis
+
+    def without_straddled(**kwargs):
+        kwargs["straddled_findings"] = ()
+        return original_analysis(**kwargs)
+
+    monkeypatch.setattr(analyser_module, "Analysis", without_straddled)
+    loose = load_lexicon(FIXTURES / "lexicon_advisory.json")
+    with pytest.raises(UnreportedMatchError, match="no such finding was emitted"):
+        analyse("I want a large trade. some wick setups only.", loose)
+
+
+def test_the_choke_point_covers_every_reason_it_declares():
+    """No reason may exist that means "dropped", now or later.
+
+    The choke point is only as good as its closed set of reasons: a future
+    edit that adds a reason without an emitted finding to back it would open
+    the same door again with the check still in place. Every declared reason
+    is either backed by a finding collection or is the coverage case, and this
+    is what says so.
+    """
+    backed = {
+        analyser_module.RESOLVED_OR_REFUSED,
+        analyser_module.REBASED,
+        analyser_module.UNRULED_SLOT,
+        analyser_module.CONTESTED,
+        analyser_module.STRADDLED,
+    }
+    assert backed | {analyser_module.COVERED_BY_RULING} == set(
+        analyser_module._ACCOUNTING_REASONS
+    ), "a reason exists that the verifier does not check against a finding"
+
+
+def test_the_pl_reproduction_and_its_control_behave_identically(lexicon):
+    """The blocker itself, and the control that showed it was a deletion.
+
+    The dotted token changes nothing about what the source SAYS. It changed
+    everything about what HSA reported: the same sentence resolved at exit 0
+    with nothing unresolved, while its control refused for ``good_breakout`` —
+    a PID line 118 must-not-guess phrase. Both must now refuse, for the same
+    item, and the ``no_wick_candle`` pair beside it must both resolve.
+    """
+    reproduction = (
+        "XAUUSD 15m breakout rules.\n\n"
+        "I only take a valid m.a breakout of the range."
+    )
+    control = (
+        "XAUUSD 15m breakout rules.\n\nI only take a valid breakout of the range."
+    )
+    for source in (reproduction, control):
+        result = intake(
+            build_request(source, "VIDEO_DERIVED", "unit test"),
+            lexicon=lexicon,
+            generated_at_utc=STAMP,
+        )
+        assert not result.sufficiently_defined, source
+        assert [item["item_id"] for item in result.document["unresolved_items"]] == [
+            "good_breakout"
+        ], source
+
+    # The PARAMETERISE side leaked the same way, and with no marker word
+    # anywhere in the term: no_wick_candle has no adjective for a marker family
+    # to catch, so EVERY boundary-crossing match of it vanished in silence.
+    dotted = "XAUUSD 15m rules.\n\nI want a no-wick h.4 confirmation."
+    plain = "XAUUSD 15m rules.\n\nI want a no-wick 15m confirmation."
+    outcomes = []
+    for source in (dotted, plain):
+        result = intake(
+            build_request(source, "VIDEO_DERIVED", "unit test"),
+            lexicon=lexicon,
+            generated_at_utc=STAMP,
+        )
+        outcomes.append(
+            (
+                result.sufficiently_defined,
+                [entry["term_id"] for entry in result.document["resolved_terms"]],
+            )
+        )
+    assert outcomes[0] == outcomes[1], outcomes
+    assert outcomes[0] == (True, ["no_wick_candle"]), outcomes
+
+
+def test_a_dotted_token_does_not_end_a_sentence_but_a_full_stop_still_does(lexicon):
+    """The tokenisation half, stated over the forms intake actually receives.
+
+    Widening the decimal exception to an intra-token exception is what makes
+    the pair above behave identically rather than merely both refusing. It must
+    not cost the boundaries that are real.
+    """
+    for token in ("m.a", "h.4", "4.hour", "vwap.session", "a.m", "1.5"):
+        analysis = analyse("i enter on a %s wick here" % token, lexicon)
+        bounds = analyser_module._sentence_bounds(
+            analysis.normalised, lexicon.sentence_terminators
+        )
+        assert len(bounds) == 1, (token, bounds)
+    for real in ("trade. some wick", "trade! some wick", "trade? some wick",
+                 "trade; some wick"):
+        analysis = analyse("i enter on a %s here" % real, lexicon)
+        bounds = analyser_module._sentence_bounds(
+            analysis.normalised, lexicon.sentence_terminators
+        )
+        assert len(bounds) == 2, (real, bounds)
+    # A terminator at the end of the text, and one before a bracket, both
+    # still end a sentence: the exception needs a word character on BOTH sides.
+    for tail in ("i enter on a wick.", "i enter on a wick.)"):
+        analysis = analyse(tail + " and then i wait", lexicon)
+        bounds = analyser_module._sentence_bounds(
+            analysis.normalised, lexicon.sentence_terminators
+        )
+        assert len(bounds) == 2, (tail, bounds)
+
+
+def test_the_sentence_boundary_ruling_is_declared_data_not_code(lexicon):
+    """The third rule now says what it does, like the other two.
+
+    It declared a rule, a terminator set and a rationale, and no consequence at
+    all: no disposition, no severity, no template, nothing to emit. A rule with
+    no declared consequence is not a ruling, and for four audits this one
+    quietly deleted terms.
+    """
+    policy = lexicon.sentence_boundary_policy
+    assert policy["disposition"] == REFUSE
+    assert policy["severity"] == "BLOCKING"
+    assert set(policy["blocks"])
+    assert "{term_label}" in policy["why_unresolved_template"]
+    assert "{context_text}" in policy["why_unresolved_template"]
+    assert policy["resolution_needed"]["responsible"] in {"MATT", "SOURCE_AUTHOR"}
+    # The three rules that can stop a recognised match resolving declare the
+    # same things. Asserted as a comparison so a fourth cannot be added with
+    # less than the other three have.
+    required = {"disposition", "severity", "blocks", "why_unresolved_template",
+                "resolution_needed"}
+    for rule in ("sentence_boundary", "unruled_slot_content", "overlap_resolution"):
+        assert required <= set(lexicon.term_match_policy[rule]), rule
+
+
+def test_sentence_boundary_policy_must_refuse(tmp_path):
+    """A lexicon that flips this to PARAMETERISE re-opens the silent path."""
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    source["term_match_policy"]["sentence_boundary"]["disposition"] = PARAMETERISE
+    broken = tmp_path / "boundary_parameterise.json"
+    broken.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(LexiconError, match="must be REFUSE"):
+        load_lexicon(broken)
+
+
+def test_a_lexicon_with_no_boundary_consequence_is_refused_at_load(tmp_path):
+    """Declaring a rule and no consequence is what shipped. It no longer loads."""
+    source = json.loads(
+        (FIXTURES / "lexicon_advisory.json").read_text(encoding="utf-8")
+    )
+    for key in ("disposition", "severity", "blocks", "why_unresolved_template",
+                "resolution_needed"):
+        broken_source = json.loads(json.dumps(source))
+        del broken_source["term_match_policy"]["sentence_boundary"][key]
+        broken = tmp_path / ("no_boundary_%s.json" % key)
+        broken.write_text(json.dumps(broken_source), encoding="utf-8")
+        with pytest.raises(LexiconError):
+            load_lexicon(broken)
 
 
 def test_the_invariant_holds_for_a_lexicon_nobody_tightened(lexicon):

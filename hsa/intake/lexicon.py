@@ -270,6 +270,17 @@ class Lexicon:
         return self.term_match_policy["overlap_resolution"]
 
     @property
+    def sentence_boundary_policy(self) -> Mapping[str, Any]:
+        """The ruling applied when a match runs across a sentence boundary.
+
+        The third of the three rules that can stop a recognised match
+        resolving, and the last to be given a consequence. Its shape is the
+        same as the other two on purpose: a reviewer comparing the three
+        should not have to notice that one of them says nothing.
+        """
+        return self.term_match_policy["sentence_boundary"]
+
+    @property
     def sentence_terminators(self) -> str:
         """Terminators a term match may not cross. One declaration, one place.
 
@@ -355,13 +366,67 @@ def _slot_group_span(pattern: str) -> tuple[int, int] | None:
     return (start, len(pattern))
 
 
+#: The alphanumeric characters a character class is tested against. ASCII
+#: only, because that is what the analyser's normalised text is made of and
+#: what every declared pattern is written in.
+_PROBE_CHARACTERS = tuple(
+    chr(code)
+    for code in range(0x20, 0x7F)
+    if chr(code).isalnum()
+)
+
+#: How many of those a class may accept before it counts as a WILDCARD rather
+#: than an enumeration. A ruled term names its words; a class listing three or
+#: fewer alphanumerics is naming characters ("[ -]", "[0-9]" is not — that is
+#: ten), while one that accepts a run of the alphabet has stopped naming and
+#: started accepting whatever is there. This threshold is the guard's declared
+#: limit and is stated in its own error message and in
+#: ``docs/AMBIGUITY-POLICY.md`` rather than left for a reader to infer.
+_ENUMERATED_CLASS_LIMIT = 3
+
+
+def _class_is_a_wildcard(klass: str) -> bool:
+    """Whether a character class accepts an unenumerated run of characters.
+
+    Decided by ASKING the class what it matches, not by looking for known
+    spellings in its source text. The previous version tested for the literal
+    tokens ``a-z``, ``A-Z``, ``\\w``, ``\\S``, ``\\D`` and a leading ``^``,
+    and claimed in its docstring to find "every construct that can match an
+    unenumerated word". It did not: ``[a-y ]``, ``[b-z ]`` and
+    ``[\\x61-\\x7a ]`` all name a run of the alphabet, spell none of those
+    tokens, and loaded cleanly — and with one of them in a pattern the
+    analyser silently swallows markers, so "a large wick healthy pullback"
+    resolves. That was latent rather than live (no shipped pattern does it,
+    and REFUSE terms still surface), but an overstated guard is worse than
+    none, and this repository holds itself to that elsewhere.
+
+    A malformed class is treated as a wildcard: refusing to load beats
+    guessing what it meant.
+    """
+    try:
+        compiled = re.compile(klass)
+    except re.error:
+        return True
+    accepted = sum(1 for char in _PROBE_CHARACTERS if compiled.match(char))
+    return accepted > _ENUMERATED_CLASS_LIMIT
+
+
 def _wildcards_outside_slot(pattern: str) -> list[str]:
-    """Every construct in ``pattern`` that can match an unenumerated word.
+    """Every construct in ``pattern`` that accepts an unenumerated run.
 
     A ruled term is a phrase the lexicon names. Wherever a pattern stops
     naming words and starts accepting whatever is there, that run is a
     WILDCARD and the text it consumes is not ruled. This finds those runs and
     reports the ones that fall outside the declared ``basis_slot`` group.
+
+    WHAT THIS DOES AND DOES NOT CLAIM. It reports: the escapes ``\\w``,
+    ``\\W``, ``\\s``, ``\\S`` and ``\\D``; a bare ``.``; and any character
+    class that accepts more than ``_ENUMERATED_CLASS_LIMIT`` ASCII
+    alphanumerics, however that class is spelled. It does NOT claim to find
+    every conceivable way a regular expression can be permissive — a
+    pathological alternation enumerating a hundred words is not a wildcard by
+    this test and arguably should not be. The limit is stated rather than
+    implied, which is the difference between a guard and an assurance.
     """
     slot = _slot_group_span(pattern)
     slot_start, slot_end = slot if slot else (-1, -1)
@@ -385,12 +450,9 @@ def _wildcards_outside_slot(pattern: str) -> list[str]:
                 close += 1
             while close < length and pattern[close] != "]":
                 close += 2 if pattern[close] == "\\" else 1
-            body = pattern[index + 1 : close]
-            letters = body.startswith("^") or any(
-                token in body for token in ("a-z", "A-Z", "\\w", "\\S", "\\D")
-            )
-            if letters and not (slot_start <= index < slot_end):
-                found.append(pattern[index : close + 1])
+            klass = pattern[index : close + 1]
+            if _class_is_a_wildcard(klass) and not (slot_start <= index < slot_end):
+                found.append(klass)
             index = close + 1
             continue
         if char == ".":
@@ -415,6 +477,10 @@ def _check_wildcard_slots(pattern: str, where: str) -> None:
     line 115's must-not-guess phrases — and hid it behind a resolution,
     silently, at exit 0. Rather than trusting a future author to remember,
     the lexicon simply does not load.
+
+    What counts as a wildcard is decided by ``_wildcards_outside_slot``, and
+    its limit is declared there rather than implied. It is not a proof that a
+    pattern is free of every possible permissiveness.
     """
     stray = _wildcards_outside_slot(pattern)
     if not stray:
@@ -426,10 +492,12 @@ def _check_wildcard_slots(pattern: str, where: str) -> None:
         "text a term consumed is not scanned again, so an undeclared wildcard "
         "silently swallows whatever falls into it — including a REFUSE term "
         "or a discretionary marker. Wrap the wildcard run in (?P<%s>...), or "
-        "enumerate the words the pattern is willing to accept "
+        "enumerate the words the pattern is willing to accept. A character "
+        "class counts as a wildcard here when it accepts more than %d ASCII "
+        "alphanumerics, whatever it is spelled as "
         "(docs/AMBIGUITY-POLICY.md, 'A wildcard slot is not ruled text')."
         % (where, ", ".join(repr(item) for item in stray), BASIS_SLOT_GROUP,
-           BASIS_SLOT_GROUP)
+           BASIS_SLOT_GROUP, _ENUMERATED_CLASS_LIMIT)
     )
 
 
@@ -780,7 +848,13 @@ def _load_term_match_policy(
       Its terminator set must be the same one ``basis_qualifier_policy.window``
       cuts sentences with; two different sets would mean a match boundary and
       a window boundary disagreeing about where a sentence ends, which is a
-      contradiction a reviewer would have to find by reading code.
+      contradiction a reviewer would have to find by reading code. It must
+      also declare a DISPOSITION and everything needed to emit an item, like
+      the other two. It did not, and that gap is the whole of R8: it was the
+      one of the three rules that could stop a recognised match resolving
+      while declaring no consequence and emitting no finding, so for four
+      audits it deleted terms in silence. A rule with no declared consequence
+      is not a ruling, and this loader no longer accepts one.
     * ``unruled_slot_content`` — what happens when a PARAMETERISE term's
       wildcard slot holds a REFUSE term or an unruled marker. It refuses, for
       the same reason ``unknown_term_policy`` does: undefined language about
@@ -801,8 +875,33 @@ def _load_term_match_policy(
     boundary = _require(raw, "sentence_boundary", where)
     _check_enum(_require(boundary, "rule", sub), _WINDOW_UNITS, sub, "rule")
     terminators = _require_text(boundary, "sentence_terminators", sub)
-    _require_text(boundary, "decimal_exception", sub)
+    _require_text(boundary, "intra_token_exception", sub)
     _require_text(boundary, "why", sub)
+    if boundary.get("disposition") != REFUSE:
+        raise LexiconError(
+            "%s: disposition must be REFUSE. A recognised term match that runs "
+            "across a sentence boundary is a term HSA will not resolve, and a "
+            "term HSA will not resolve fails closed like every other one. This "
+            "rule declared no disposition at all for four audits: it discarded "
+            "the match instead, so \"a valid m.a breakout\" lost a PID line "
+            "118 must-not-guess phrase and drafted at exit 0 with nothing "
+            "unresolved (PID line 39)" % sub
+        )
+    _check_enum(_require(boundary, "severity", sub), _SEVERITIES, sub, "severity")
+    raw_blocks = _require(boundary, "blocks", sub)
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        raise LexiconError("%s: blocks must be a non-empty list" % sub)
+    for block in raw_blocks:
+        _check_enum(block, _BLOCKS, sub, "blocks entry")
+    _require_text(boundary, "precedence", sub)
+    _require_text(boundary, "why_unresolved_template", sub)
+    resolution = _require(boundary, "resolution_needed", sub)
+    deeper = "%s resolution_needed" % sub
+    _check_enum(_require(resolution, "kind", deeper), _RESOLUTION_KINDS, deeper, "kind")
+    _check_enum(
+        _require(resolution, "responsible", deeper), _RESPONSIBLE, deeper, "responsible"
+    )
+    _require_text(resolution, "description_template", deeper)
     window = _require(raw_qualifier_policy, "window", where)
     declared = window.get("sentence_terminators") if isinstance(window, Mapping) else None
     if declared != terminators:

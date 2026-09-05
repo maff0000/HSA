@@ -168,47 +168,124 @@ def test_the_inventory_holds_the_example_a_package():
     )
 
 
+def _assert_promotion_is_evidenced(package: dict, where) -> None:
+    """The inventory invariant itself, over one package.
+
+    Promotion is an evidence-gated act (``docs/VERSIONING.md`` §1), so a
+    package that CLAIMS promotion must carry CER_LIVE promotion evidence, and
+    any promotion evidence a package carries at all must be CER_LIVE rather
+    than a fixture standing in for a gate nobody passed.
+
+    It asks the first of those only of the statuses that actually claim
+    promotion. RETIRED does not: ``CANDIDATE -> RETIRED`` is a legitimate
+    gate-free transition, so a retired rejected candidate rightly carries no
+    promotion evidence, and demanding some of it would refuse an honest record.
+
+    Extracted from the test below so the SAME predicate can be run over the
+    real inventory (where it is dormant today) and over constructed packages
+    (where it is not). See that test's docstring.
+    """
+    status = status_of(package)
+    if status in PROMOTION_PROVEN_BY_STATUS:
+        live = [
+            reference
+            for reference in promotion_evidence_of(package)
+            if reference.get("source") == SOURCE_CER_LIVE
+        ]
+        assert live, (
+            "%s is %s but carries no CER_LIVE promotion evidence. A status is "
+            "not a gate: promotion is an evidence-gated act (PID line 189)."
+            % (where, status)
+        )
+    for reference in package.get("cer_references", []):
+        if reference.get("reference_type") != PROMOTION_EVIDENCE_TYPE:
+            continue
+        assert reference.get("source") == SOURCE_CER_LIVE, (
+            "%s carries %s evidence sourced %r. Promotion is the one verdict a "
+            "contract fixture may not stand in for: it is what freezes a "
+            "version and what lets another version supersede it (PID line 189)."
+            % (where, PROMOTION_EVIDENCE_TYPE, reference.get("source"))
+        )
+
+
+def _package_claiming(status: str, evidence_source: str | None) -> dict:
+    """A minimal package that claims ``status``, for exercising the invariant.
+
+    Built here rather than written to disk on purpose: the point of the
+    invariant is that no package in the INVENTORY may claim a gate it never
+    passed, so manufacturing one on disk to test it would be the exact act it
+    forbids. This is a value in memory and it never leaves this function's
+    caller.
+    """
+    package = {
+        "strategy_id": "scaffold_only",
+        "strategy_version": "1.0.0",
+        "lifecycle": {
+            "status": status,
+            "immutable_once_promoted": True,
+            "created_at_utc": "2026-09-04T00:00:00Z",
+            "supersedes": None,
+        },
+        "cer_references": [],
+    }
+    if evidence_source is not None:
+        package["cer_references"].append(
+            {
+                "strategy_id": "scaffold_only",
+                "strategy_version": "1.0.0",
+                "reference_type": PROMOTION_EVIDENCE_TYPE,
+                "source": evidence_source,
+            }
+        )
+    return package
+
+
 def test_no_package_is_marked_promoted_without_live_cer_evidence():
     """The invariant that makes a fabricated promotion fail the suite.
 
-    Promotion is an evidence-gated act (``docs/VERSIONING.md`` §1). CER is
-    not live, so no package may carry a status that claims it passed a gate.
-    The moment CER goes live and a real promotion happens, this test still
-    passes — it asks for CER_LIVE promotion evidence, not for CANDIDATE.
+    Over the real inventory this executes NO assertion today and cannot: 1.0.0
+    is a CANDIDATE carrying no promotion evidence, so both branches are skipped
+    and the loop is a no-op. That was the state this test shipped in, and
+    unlike its neighbour below it did not say so — ``docs/ACCEPTANCE.md``
+    presented it as an active guard while nothing it asserts had ever run. A
+    dormant guard is a reasonable thing to have; a dormant guard presented as a
+    live one is not, which is the whole reason this repository writes
+    non-vacuity proofs.
 
-    It asks that only of the statuses that actually CLAIM promotion. RETIRED
-    does not: ``CANDIDATE -> RETIRED`` is a legitimate gate-free transition,
-    so a retired rejected candidate rightly carries no promotion evidence,
-    and demanding some of it would refuse an honest record. What is demanded
-    of every package instead is the second assertion: promotion evidence, if
-    present at all, must be CER_LIVE — otherwise a fixture-backed reference
-    could stand in for a gate that was never passed.
+    So the predicate is now exercised directly, against constructed packages,
+    and the real-inventory sweep sits on top of it. The scaffold packages are
+    in-memory values and are never written to ``strategies/``: manufacturing a
+    promoted package on disk to test the rule against fabricated promotions
+    would be the act the rule forbids.
+
+    The moment CER goes live and a real promotion happens, the sweep gains its
+    own teeth without a rewrite — it asks for CER_LIVE promotion evidence, not
+    for CANDIDATE.
     """
+    # (1) the predicate, exercised. A package claiming a promotion-proving
+    #     status with no live evidence must fail; the same status with live
+    #     evidence must pass; fixture-sourced promotion evidence must fail
+    #     whatever the status.
+    exercised = 0
+    for status in PROMOTION_PROVEN_BY_STATUS:
+        with pytest.raises(AssertionError, match="not a gate"):
+            _assert_promotion_is_evidenced(
+                _package_claiming(status, None), "scaffold"
+            )
+        _assert_promotion_is_evidenced(
+            _package_claiming(status, SOURCE_CER_LIVE), "scaffold"
+        )
+        exercised += 1
+    assert exercised, "PROMOTION_PROVEN_BY_STATUS went empty; nothing is checked"
+
+    with pytest.raises(AssertionError, match="may not stand in for"):
+        _assert_promotion_is_evidenced(
+            _package_claiming(STATUS_CANDIDATE, "CONTRACT_FIXTURE"), "scaffold"
+        )
+
+    # (2) and the same predicate over what the inventory actually holds.
     for path in _inventory_packages():
-        package = read_json_file(path)
-        status = status_of(package)
-        where = path.relative_to(REPO)
-        if status in PROMOTION_PROVEN_BY_STATUS:
-            live = [
-                reference
-                for reference in promotion_evidence_of(package)
-                if reference.get("source") == SOURCE_CER_LIVE
-            ]
-            assert live, (
-                "%s is %s but carries no CER_LIVE promotion evidence. A "
-                "status is not a gate: promotion is an evidence-gated act "
-                "(PID line 189)." % (where, status)
-            )
-        for reference in package.get("cer_references", []):
-            if reference.get("reference_type") != PROMOTION_EVIDENCE_TYPE:
-                continue
-            assert reference.get("source") == SOURCE_CER_LIVE, (
-                "%s carries %s evidence sourced %r. Promotion is the one "
-                "verdict a contract fixture may not stand in for: it is what "
-                "freezes a version and what lets another version supersede it "
-                "(PID line 189)."
-                % (where, PROMOTION_EVIDENCE_TYPE, reference.get("source"))
-            )
+        _assert_promotion_is_evidenced(read_json_file(path), path.relative_to(REPO))
 
 
 def test_any_superseding_version_the_inventory_holds_is_a_governed_derivation():

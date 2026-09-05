@@ -14,6 +14,7 @@ notice the one adjective that slipped through. A test will.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -223,25 +224,51 @@ def test_entry_declares_atomic_doctrine(entry):
     assert all(entry["doctrine_assertions"].values())
 
 
+def _peer_strategy_ids(entry: dict) -> list[str]:
+    """Every ``strategy_id`` in ``entry`` that is not the entry's own.
+
+    The entry's TOP-LEVEL ``strategy_id`` is excluded, and that exclusion is
+    the point. This walk used to start at the entry itself, so the first key it
+    reached was the entry's own id and the assertion it made there was
+    ``own == own`` — an assertion that cannot fail, executed for every entry in
+    the catalogue, in a test whose name promises a peer-reference check.
+    """
+    own = entry["strategy_id"]
+    found: list[str] = []
+
+    def walk(node, top: bool) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "strategy_id" and not top and value != own:
+                    found.append(value)
+                walk(value, False)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, False)
+
+    walk(entry, True)
+    return found
+
+
 def test_entry_references_no_other_strategy(entry):
     """PID line 59: the only strategy_id in an atomic document is its own.
 
     The schema forbids a peer-reference property; this checks that no such
     reference smuggled itself in under a key the schema does allow.
+
+    The walk is proved to REACH nested structure before its emptiness is
+    concluded from: a walker that silently stopped at the top level would
+    return nothing and this test would pass on a catalogue full of peer
+    references.
     """
-    own = entry["strategy_id"]
+    assert not _peer_strategy_ids(entry)
 
-    def walk(node):
-        if isinstance(node, dict):
-            for key, value in node.items():
-                if key == "strategy_id":
-                    assert value == own, "references peer strategy %r" % value
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(entry)
+    planted = copy.deepcopy(entry)
+    planted["parameters"][0]["strategy_id"] = "some_other_strategy"
+    assert _peer_strategy_ids(planted) == ["some_other_strategy"], (
+        "the walk no longer reaches nested structure, so its empty result "
+        "above proves nothing"
+    )
 
 
 # --- catalogue-level authoring rules -----------------------------------------

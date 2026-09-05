@@ -39,14 +39,41 @@ literal head nouns included. Scoping it to the wildcard slot is what left this
 open after the previous repair, and scoping is exactly what a fifth phrasing
 walks around.
 
-A TERM MATCH MAY NOT SPAN A SENTENCE BOUNDARY. The same wildcard let a match
-run across a full stop — "a large trade. some wick setups only" matched
-``large_wick`` — and swallow the start of the next sentence with it. The rule
-is enforced here, on the match, rather than by tightening each pattern:
-patterns are tightened too, but a pattern-level fix protects only the patterns
-that exist today, and this one holds for a term nobody has declared yet. A
-``.`` between two digits is a decimal point, not a terminator, so "1.5" stays
-one token.
+A TERM MATCH MAY NOT SPAN A SENTENCE BOUNDARY, AND DECLINING TO READ ONE IS NOT
+PERMISSION TO DELETE IT. The same wildcard let a match run across a full stop —
+"a large trade. some wick setups only" matched ``large_wick`` — and swallow the
+start of the next sentence with it. The rule is enforced here, on the match,
+rather than by tightening each pattern: patterns are tightened too, but a
+pattern-level fix protects only the patterns that exist today, and this one
+holds for a term nobody has declared yet.
+
+That rule is two decisions and for four audits only one of them was made. The
+match is NOT ACCEPTED — it resolves nothing and suppresses nothing, so
+everything on the far side of the boundary is still scanned, which is the
+concern that justified the rule. It is also NOT DISCARDED, which nothing ever
+justified: a recognised term left no finding of any kind, so
+
+    "XAUUSD 15m breakout rules. I only take a valid m.a breakout of the range."
+
+drafted at exit 0 with nothing unresolved, while the same sentence without the
+dotted token refused for ``good_breakout`` — a PID line 118 must-not-guess
+phrase. It is now refused AND reported, like the other two rules in
+``term_match_policy``.
+
+The way in was the sentence splitter, not the patterns: only a ``.`` between
+two DIGITS was exempt, so "m.a", "h.4", "4.hour", "vwap.session" and "a.m" each
+read as a sentence ending mid-word. A terminator with a word character on both
+sides is now treated as inside a token; "1.5" is the special case of that, and
+"trade. some" still ends a sentence.
+
+NOTHING MAY CAUSE A RECOGNISED TERM TO GO UNREPORTED, AND THAT IS CHECKED. R7
+stated this over overlap resolution; the general form is one word wider, and
+stating it is what the previous four repairs also did. Every recognised match
+is written into a ledger with the single reason it is accounted for, and
+``_verify_every_recognised_match_is_reported`` checks that ledger against the
+findings actually emitted before ``analyse`` returns. There is no reason
+meaning "dropped", so a sixth deletion path raises ``UnreportedMatchError``
+rather than going quiet.
 
 Between those two passes sits the basis-qualifier check. A ruled
 PARAMETERISE term is only ruled for the claim the lexicon declares: "large
@@ -104,8 +131,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
+from hsa.intake.errors import UnreportedMatchError
 from hsa.intake.lexicon import (
     BASIS_SLOT_GROUP,
     PARAMETERISE,
@@ -122,6 +150,7 @@ __all__ = [
     "RebasedFinding",
     "UnruledSlotFinding",
     "ContestedMatchFinding",
+    "StraddledMatchFinding",
     "UnknownFinding",
     "Analysis",
     "normalise",
@@ -398,6 +427,78 @@ class ContestedMatchFinding:
 
 
 @dataclass(frozen=True)
+class StraddledMatchFinding:
+    """A recognised term match that runs from one sentence into the next.
+
+    A ruled term is a phrase and a phrase does not straddle a full stop, so
+    this match may not be treated as a ruling: it may not resolve a parameter,
+    and — the half that matters more — it may not suppress scanning, because
+    keeping it would hide everything on the far side of that stop. Both of
+    those were already true. What was NOT true is that it gets reported.
+
+    For four audits this was a bare ``continue``. The match was thrown away
+    before it entered any collection, so it never reached the overlap contest,
+    never reached the slot scan, and produced no finding of any kind. It was
+    the third of exactly three rules that can stop a recognised match
+    resolving, and the only one with no declared disposition and no emitted
+    item — which is why five audits in a row found "a recognised term deleted
+    without being reported" and four repairs in a row closed a different door.
+
+    So it now says both things at once, which is what the original comment's
+    concern actually requires: the match is NOT accepted (nothing is
+    suppressed, and every other term and marker still scans the far side of
+    the boundary freely), AND the span is reported (the reader is told that
+    HSA's pattern for a ruled term reached across a sentence boundary here,
+    and that HSA will not read it as that term). Neither half is a guess.
+    """
+
+    item_id: str
+    term: Term
+    #: The straddling spans themselves, quoted verbatim, in document order.
+    occurrences: tuple[Occurrence, ...]
+    #: The declared terminator set the span ran across, for the message.
+    terminators: str
+
+    @property
+    def location(self) -> str:
+        return "; ".join(occurrence.describe() for occurrence in self.occurrences)
+
+    @property
+    def context_text(self) -> str:
+        seen: list[str] = []
+        for occurrence in self.occurrences:
+            text = " ".join(occurrence.text.split())
+            if text and text not in seen:
+                seen.append(text)
+        return " / ".join(seen)
+
+
+#: The closed set of reasons a recognised term match may be accounted for.
+#: Every recognised match must carry exactly one of these by the end of the
+#: scan, and ``_verify_every_recognised_match_is_reported`` checks each one
+#: against the findings actually emitted. Adding a new way to stop a match
+#: resolving means adding a reason here and an emitted finding to back it;
+#: there is deliberately no reason meaning "dropped".
+RESOLVED_OR_REFUSED = "REPORTED_AS_TERM"
+REBASED = "REPORTED_AS_REBASED"
+UNRULED_SLOT = "REPORTED_AS_UNRULED_SLOT"
+CONTESTED = "REPORTED_AS_CONTESTED"
+STRADDLED = "REPORTED_AS_STRADDLING_A_SENTENCE_BOUNDARY"
+COVERED_BY_RULING = "COVERED_END_TO_END_BY_AN_ACCEPTED_RULING"
+
+_ACCOUNTING_REASONS = frozenset(
+    {
+        RESOLVED_OR_REFUSED,
+        REBASED,
+        UNRULED_SLOT,
+        CONTESTED,
+        STRADDLED,
+        COVERED_BY_RULING,
+    }
+)
+
+
+@dataclass(frozen=True)
 class Analysis:
     text: str
     lexicon: Lexicon
@@ -409,6 +510,11 @@ class Analysis:
     #: an unruled marker. Separate from the slot findings above only because
     #: the two need different words to explain themselves; both fail closed.
     contested_findings: tuple[ContestedMatchFinding, ...] = ()
+    #: Recognised term matches that ran across a sentence boundary. Not
+    #: accepted as rulings — they suppress nothing — and not discarded either,
+    #: which is the whole of R8: this was the third and last rule that could
+    #: stop a match resolving without saying so.
+    straddled_findings: tuple[StraddledMatchFinding, ...] = ()
     #: The lowercased, whitespace-collapsed copy the scan actually ran over.
     normalised: str = ""
     #: Spans of ``normalised`` that a ruled term LITERALLY claimed — the
@@ -555,12 +661,32 @@ def _slug(value: str, limit: int) -> str:
 def _is_terminator(norm: str, index: int, stops: frozenset) -> bool:
     """Whether the character at ``index`` actually ends a sentence.
 
-    A ``.`` between two digits is a decimal point, not a full stop. Without
-    that exception "an upper wick of at least 0.60 of its range" is three
-    sentences, and the sentence rules built on this — the qualifier window, and
-    the rule that a term match may not cross a boundary — would both cut a
-    number in half. The exception is declared in the lexicon beside the
-    terminator set, not assumed here.
+    A ``.`` INSIDE a token is not a full stop. This used to be stated only for
+    the decimal case — a ``.`` between two DIGITS — and that narrowness is
+    where the fifth audit's defect came in. "1.5" was safe; "m.a", "h.4",
+    "4.hour", "vwap.session" and "a.m" were each read as a sentence ending
+    mid-word, so a term match spanning one of them was judged to cross a
+    boundary and was thrown away. Those are exactly the abbreviations that
+    arrive through VIDEO_DERIVED and TRADER_EXPLANATION intake (PID lines
+    104-105), and "I only take a valid m.a breakout of the range" lost a PID
+    line 118 must-not-guess phrase to it, silently, at exit 0.
+
+    So the exception is stated at the level it was always about: a terminator
+    character with a word character on BOTH sides is inside a token, not
+    between two sentences. The decimal case is the special case of that, not
+    the rule. "trade. some" still ends a sentence (a space follows), and so
+    does "the range." at the end of the text, and "the range.)" before a
+    bracket — the exception needs word characters on both sides, so it cannot
+    swallow real punctuation.
+
+    Only ``.`` takes the exception, because ``.`` is the only terminator that
+    has an intra-token job in trading prose (decimals, abbreviations, dotted
+    timeframe and session tokens) and the only one a term pattern's declared
+    slot is allowed to consume. Widening it further would mean guessing.
+
+    The terminator SET is declared in the lexicon; so is this exception, in
+    ``term_match_policy.sentence_boundary.intra_token_exception``. Neither is
+    assumed here.
     """
     char = norm[index]
     if char not in stops:
@@ -569,7 +695,7 @@ def _is_terminator(norm: str, index: int, stops: frozenset) -> bool:
         return True
     before = norm[index - 1] if index else ""
     after = norm[index + 1] if index + 1 < len(norm) else ""
-    return not (before.isdigit() and after.isdigit())
+    return not (before.isalnum() and after.isalnum())
 
 
 def _sentence_bounds(norm: str, terminators: str) -> list[tuple[int, int]]:
@@ -1055,18 +1181,52 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     # boundary that bounds a window are the same boundary.
     bounds = _sentence_bounds(norm, lexicon.sentence_terminators)
 
+    # THE LEDGER. Every recognised term match is written down here the moment
+    # it is recognised, and every one of them must leave the scan carrying
+    # exactly one reason from ``_ACCOUNTING_REASONS`` — checked at the end,
+    # against the findings actually emitted, by
+    # ``_verify_every_recognised_match_is_reported``.
+    #
+    # This exists because "nothing HSA recognises as discretionary goes
+    # unreported" was prose for five audits and each audit found a different
+    # way through it. It is now a structural property of the scan rather than a
+    # promise about it: there is no reason meaning "dropped", so a sixth way to
+    # stop a match resolving cannot be added silently — it either declares its
+    # reason and emits a finding, or the analyser raises.
+    recognised: list[tuple[str, int, int]] = []
+    accounted: dict[tuple[str, int, int], str] = {}
+
     # Pass 1 — ruled lexicon terms. Every match is collected first, then
     # overlaps are resolved by a fixed rule, so a longer ruled phrase always
     # beats a shorter one that starts in the same place. A match that runs from
-    # one sentence into the next is discarded before any of that: it is not a
-    # phrase, it is a wildcard slot that swallowed a full stop, and keeping it
+    # one sentence into the next takes no part in that contest: it is not a
+    # phrase, it is a wildcard slot that swallowed a full stop, and accepting it
     # would hide everything on the far side of that stop.
+    #
+    # It is not DISCARDED, though, and that distinction is R8. It used to be a
+    # bare ``continue``, which answered the hiding concern and created the
+    # opposite one: the recognised term vanished with no finding at all, so
+    # "XAUUSD 15m breakout rules. I only take a valid m.a breakout of the
+    # range." drafted at exit 0 with nothing unresolved, while the same
+    # sentence without the dotted token refused for good_breakout (PID line
+    # 118). Not accepting it and not reporting it are two different decisions,
+    # and only the first of them was ever justified.
     candidates: list[tuple[int, int, int, Term, "re.Match[str]"]] = []
+    straddling: dict[str, list[tuple[int, int]]] = {}
+    straddling_terms: dict[str, Term] = {}
     for order, term in enumerate(lexicon.terms):
         for match in term.pattern.finditer(norm):
             if match.end() <= match.start():
                 continue
+            key = (term.term_id, match.start(), match.end())
+            if key not in accounted:
+                recognised.append(key)
             if _crosses_sentence(bounds, match.start(), match.end()):
+                accounted[key] = STRADDLED
+                straddling.setdefault(term.term_id, []).append(
+                    (match.start(), match.end())
+                )
+                straddling_terms[term.term_id] = term
                 continue
             candidates.append((match.start(), match.end(), order, term, match))
     candidates.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
@@ -1090,6 +1250,10 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
     accepted: list[tuple[int, int, Term, "re.Match[str]", tuple[int, int]]] = []
     for start, end, _order, term, match in candidates:
         if _covered(ruled, start, end):
+            # Accounted for, not dropped: the accepted rulings claim this text
+            # end to end, and each of those rulings is itself reported. The
+            # verifier re-checks that coverage rather than taking it on trust.
+            accounted[(term.term_id, start, end)] = COVERED_BY_RULING
             continue
         slot = _slot_span(match, start)
         ruled.extend(_ruled_spans(start, end, slot))
@@ -1326,6 +1490,22 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             )
         )
 
+    straddled_findings: list[StraddledMatchFinding] = []
+    for term_id, spans in straddling.items():
+        straddled_findings.append(
+            StraddledMatchFinding(
+                item_id=_unique_item_id(
+                    "straddled_" + term_id, used_item_ids, "straddled_term"
+                ),
+                term=straddling_terms[term_id],
+                occurrences=tuple(
+                    _occurrence(text, index_map, starts, start, end)
+                    for start, end in sorted(spans)
+                ),
+                terminators=lexicon.sentence_terminators,
+            )
+        )
+
     grouped: dict[tuple[str, str], list[Occurrence]] = {}
     markers_by_key: dict[tuple[str, str], Marker] = {}
     for start, _end, widened_end, marker in marker_hits:
@@ -1350,7 +1530,20 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
             )
         )
 
-    return Analysis(
+    # Every ACCEPTED match's reason is read off where its term_id actually
+    # landed, not asserted here. A term_id that reached the end of the scan in
+    # none of the finding collections has been deleted, and the verifier below
+    # is what says so out loud.
+    for start, end, term, _match, _slot in accepted:
+        accounted[(term.term_id, start, end)] = _accepted_reason(
+            term.term_id,
+            term_findings,
+            rebased_findings,
+            unruled_slot_findings,
+            contested_findings,
+        )
+
+    analysis = Analysis(
         text=text,
         lexicon=lexicon,
         term_findings=term_findings,
@@ -1358,6 +1551,109 @@ def analyse(text: str, lexicon: Lexicon) -> Analysis:
         rebased_findings=tuple(rebased_findings),
         unruled_slot_findings=tuple(unruled_slot_findings),
         contested_findings=tuple(contested_findings),
+        straddled_findings=tuple(straddled_findings),
         normalised=norm,
         ruled_spans=tuple(sorted(ruled)),
     )
+    _verify_every_recognised_match_is_reported(analysis, recognised, accounted, ruled)
+    return analysis
+
+
+def _accepted_reason(
+    term_id: str,
+    term_findings: Sequence[TermFinding],
+    rebased_findings: Sequence[RebasedFinding],
+    unruled_slot_findings: Sequence[UnruledSlotFinding],
+    contested_findings: Sequence[ContestedMatchFinding],
+) -> str:
+    """Which finding collection an accepted term actually ended up in.
+
+    Returned rather than assumed, and returned as ``""`` when the answer is
+    "none of them" — which the verifier turns into a raised error naming the
+    term. An accepted match that reaches the end of the scan in no collection
+    is precisely the defect this whole repair sequence keeps re-finding.
+    """
+    if any(finding.term.term_id == term_id for finding in term_findings):
+        return RESOLVED_OR_REFUSED
+    if any(finding.term.term_id == term_id for finding in rebased_findings):
+        return REBASED
+    if any(finding.term.term_id == term_id for finding in unruled_slot_findings):
+        return UNRULED_SLOT
+    if any(finding.term.term_id == term_id for finding in contested_findings):
+        return CONTESTED
+    return ""
+
+
+def _verify_every_recognised_match_is_reported(
+    analysis: Analysis,
+    recognised: Sequence[tuple[str, int, int]],
+    accounted: Mapping[tuple[str, int, int], str],
+    ruled: Sequence[tuple[int, int]],
+) -> None:
+    """THE CHOKE POINT. Every recognised match, or the scan raises.
+
+    R6 closed the wildcard-slot path. R7 closed the overlap path. Both were
+    correct and both left the general statement one word too narrow: the rule
+    is not "overlap may never cause a recognised term to go unreported", it is
+    that NOTHING may. R8's sentence-boundary path was the third of exactly
+    three rules that can stop a recognised match resolving, and it survived
+    four audits precisely because nothing checked the general statement.
+
+    So this checks it, on the emitted Analysis, every run. Each recognised
+    match must carry one declared reason, and the reason must be borne out by
+    what was actually emitted:
+
+    * a reason naming a finding kind must find the term in that collection;
+    * ``COVERED_BY_RULING`` must still be covered end to end by the LITERAL
+      spans of the accepted rulings when re-tested here. That is the same
+      predicate the drop itself used, re-run against the finished span set
+      rather than taken on trust — suppression requires a ruling that covers
+      the text end to end, and a check that re-asked a weaker question would
+      be checking something other than the rule.
+
+    There is no reason meaning "dropped", which is the point. A future edit
+    that adds a fourth way to stop a match resolving either declares a reason
+    and emits a finding for it, or every source exercising it raises
+    ``UnreportedMatchError`` — loudly, in the caller's face, instead of
+    drafting at exit 0 with nothing unresolved.
+    """
+    reported: dict[str, set[str]] = {
+        RESOLVED_OR_REFUSED: {f.term.term_id for f in analysis.term_findings},
+        REBASED: {f.term.term_id for f in analysis.rebased_findings},
+        UNRULED_SLOT: {f.term.term_id for f in analysis.unruled_slot_findings},
+        CONTESTED: {f.term.term_id for f in analysis.contested_findings},
+        STRADDLED: {f.term.term_id for f in analysis.straddled_findings},
+    }
+    for term_id, start, end in recognised:
+        reason = accounted.get((term_id, start, end), "")
+        quoted = analysis.normalised[start:end]
+        if reason not in _ACCOUNTING_REASONS:
+            raise UnreportedMatchError(
+                "the analyser recognised the ruled term %r as %r at "
+                "characters %d-%d and reached the end of the scan without "
+                "either resolving it or reporting it (reason recorded: %r). "
+                "That is the defect five audits found, in a new place: a "
+                "recognised term deleted without being reported. Whatever "
+                "stopped it resolving must declare a reason and emit a "
+                "finding (see term_match_policy in the lexicon); nothing may "
+                "simply drop it."
+                % (term_id, quoted, start, end - 1, reason or None)
+            )
+        if reason == COVERED_BY_RULING:
+            if not _covered(ruled, start, end):
+                raise UnreportedMatchError(
+                    "the analyser dropped its match of the ruled term %r (%r "
+                    "at characters %d-%d) as already ruled on, but the "
+                    "accepted rulings do not cover it end to end. Partial "
+                    "coverage is not a ruling (term_match_policy."
+                    "overlap_resolution)." % (term_id, quoted, start, end - 1)
+                )
+            continue
+        if term_id not in reported[reason]:
+            raise UnreportedMatchError(
+                "the analyser recorded its match of the ruled term %r (%r at "
+                "characters %d-%d) as %s, but no such finding was emitted for "
+                "it. The reason and the report have come apart, which is how "
+                "a recognised term goes missing without anything failing."
+                % (term_id, quoted, start, end - 1, reason)
+            )

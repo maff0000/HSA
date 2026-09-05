@@ -22,8 +22,21 @@
     "sentence_boundary": {
       "rule": "SENTENCE",
       "sentence_terminators": ".!?;",
-      "decimal_exception": "A '.' between two digits is a decimal point, not a terminator.",
-      "why": "A term match may not span a sentence boundary. Test fixture."
+      "intra_token_exception": "Test fixture. A terminator with a word character on both sides is inside a token, not between two sentences.",
+      "disposition": "REFUSE",
+      "severity": "BLOCKING",
+      "blocks": [
+        "ATOMIC_DECOMPOSITION",
+        "PARAMETER_DEFINITION"
+      ],
+      "precedence": "Test fixture. A boundary-crossing match resolves nothing, suppresses nothing, and is reported.",
+      "why": "Test fixture. A term match may not span a sentence boundary; it is refused and reported rather than discarded, exactly as the shipped ruling says.",
+      "why_unresolved_template": "HSA's declared pattern for the ruled term \"{term_label}\" matched across a sentence boundary here: \"{context_text}\". A ruled term is a phrase and a phrase does not straddle a sentence terminator ({terminators}), so HSA will not read this as \"{term_label}\" — and it will not tell you the source is clean either, because it recognised the words. Either the source says \"{term_label}\" and the boundary in the middle of it is a typo, or it says two different things either side of the boundary and one of them has been left undefined. Guessing which is what PID line 39 forbids (docs/AMBIGUITY-POLICY.md, 'A term match may not span a sentence boundary').",
+      "resolution_needed": {
+        "kind": "MEASURABLE_DEFINITION",
+        "description_template": "Restate \"{context_text}\" so no ruled phrase runs across the sentence terminator. If \"{term_label}\" was meant as one phrase, remove the boundary inside it; if two separate statements were meant, say each one in full so HSA rules on each separately.",
+        "responsible": "MATT"
+      }
     },
     "slot_is_not_ruled_text": {
       "rule": "Only the literal parts of a term match suppress further scanning; the declared basis_slot does not.",

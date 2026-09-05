@@ -213,13 +213,84 @@ def test_every_ruled_parameter_declares_its_realisation(lexicon):
         )
 
 
+#: The keys by which a lexicon entry claims a catalogue realisation. Named
+#: once so the check and its non-vacuity proof cannot drift apart.
+_REALISATION_KEYS = ("realised_by", "hermes_basis_relationship")
+
+
+def _realisation_claims(entry: dict) -> list[str]:
+    """Which realisation keys ``entry`` declares, in declaration order."""
+    return [key for key in _REALISATION_KEYS if key in entry]
+
+
 def test_a_refused_term_claims_no_realisation(lexicon):
-    """A refusal has no measurement basis, so it can have no realisation."""
+    """A refusal has no measurement basis, so it can have no realisation.
+
+    Asserted against the lexicon FILE, not against the loaded object. The
+    loaded object was the whole of this test before, and it proved nothing:
+    ``Term.realised_by`` defaults to ``()`` and ``hermes_basis_relationship``
+    to ``None``, and the loader's REFUSE branch never assigns either, so both
+    assertions restated a dataclass default. A REFUSE entry declaring
+    ``realised_by`` in the JSON would have loaded, been silently dropped, and
+    passed here — while the module docstring claims this module fails when "a
+    REFUSE term claims a realisation it was refused".
+
+    The declaration is what a reviewer reads, so the declaration is what is
+    checked. The loaded-object assertions are kept underneath, because between
+    them the two say the file does not claim a realisation AND the loader did
+    not invent one.
+    """
+    by_id = {
+        entry["term_id"]: entry
+        for entry in _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")["terms"]
+    }
+    checked = 0
     for term in lexicon.terms:
         if term.disposition != REFUSE:
             continue
+        assert not _realisation_claims(by_id[term.term_id]), (
+            "%s is REFUSE but declares %s. A refusal has no ratified "
+            "measurement basis, so there is nothing for a catalogue entry to "
+            "implement"
+            % (term.term_id, ", ".join(_realisation_claims(by_id[term.term_id])))
+        )
         assert term.realised_by == ()
         assert term.hermes_basis_relationship is None
+        checked += 1
+    assert checked, "no REFUSE term in the lexicon; this test asserted nothing"
+
+
+def test_that_refusal_check_would_see_a_declared_realisation(lexicon):
+    """Non-vacuity: plant the thing the test above forbids, and see it caught.
+
+    Asserted on the PREDICATE, and on the loader beside it, because the two
+    together are the reason the file is the thing checked: a REFUSE entry that
+    declares a realisation loads without complaint and the loaded Term shows no
+    trace of it. Whatever the file claims, the object cannot tell you.
+    """
+    refused_ids = {
+        term.term_id for term in lexicon.terms if term.disposition == REFUSE
+    }
+    assert refused_ids, "no REFUSE term to plant against"
+    declared = _load(REPO_ROOT / "hsa" / "intake" / "lexicon.json")["terms"]
+    entry = next(item for item in declared if item["term_id"] in refused_ids)
+
+    assert _realisation_claims(entry) == []
+    planted = copy.deepcopy(entry)
+    planted["realised_by"] = [
+        {"strategy_id": "wick_rejection", "lexicon_parameter": "invented"}
+    ]
+    planted["hermes_basis_relationship"] = {"invented": True}
+    assert _realisation_claims(planted) == [
+        "realised_by",
+        "hermes_basis_relationship",
+    ]
+
+    # And the loaded object still shows nothing, which is why the assertion
+    # above is made on the declaration and not on the Term.
+    term = lexicon.term(entry["term_id"])
+    assert term.realised_by == ()
+    assert term.hermes_basis_relationship is None
 
 
 # --- the link resolves, and the two sides agree ------------------------------

@@ -282,8 +282,14 @@ patterns that happened to expose the problem:
 2. **A term match may not span a sentence boundary.** The same wildcard let a
    match run across a full stop and take the next sentence's opening words with
    it (`"a large trade. some wick setups only"` matched `large_wick`), hiding
-   everything it swallowed. A `.` between two digits is a decimal point, not a
-   terminator, so `1.5` is still one token.
+   everything it swallowed. So such a match is not accepted as a ruling: it
+   resolves nothing and suppresses nothing, and everything on the far side of
+   the boundary is still scanned. A terminator with a word character on **both**
+   sides is inside a token rather than between two sentences, so `1.5`, `m.a`,
+   `h.4` and `a.m` are each one token, while `"trade. some"` still ends a
+   sentence. **Declining to read a match is not permission to delete it** — see
+   "A recognised term is never deleted, only reported" below, which is where
+   this rule spent four audits being wrong.
 
 ### Why a PARAMETERISE term whose slot is unresolved does not resolve
 
@@ -379,14 +385,37 @@ around.
 ### How this is proved rather than asserted
 
 `tests/test_ambiguity.py` does not hand-write the sources it checks. It
-**enumerates** every phrase each declared pattern can spell, crosses them with
-every REFUSE term and every marker family, and places each probe at every
-position relative to the ruled phrase — before it, after it, in every gap
-between its words, and *sharing* one of its literal head nouns. Roughly three
-thousand sources, generated from the lexicon, and for every one of them: every
-REFUSE term and every marker the lexicon can find is either covered end to end
-by an accepted ruling or named in the emitted refusal. There is no third
-outcome and no silent one.
+**generates** them from the declared patterns: a bounded sample of the phrases
+each pattern can spell, crossed with every REFUSE term and every marker family,
+with each probe placed at every position relative to the ruled phrase — before
+it, after it, in every gap between its words, and *sharing* one of its literal
+head nouns. Several thousand sources, generated from the lexicon, and for every
+one of them: every term and every marker the lexicon can find is either
+resolved, or covered end to end by an accepted ruling, or named in the emitted
+refusal. There is no fourth outcome and no silent one.
+
+**A bounded sample, not an exhaustive enumeration.** This document called it
+exhaustive and it never was, which matters because the gap is where a defect
+sat. Three declared bounds, all deterministic and all in `_phrases`:
+
+- a character **range** contributes its first character only, so `[a-z]` spells
+  `a`;
+- a **repetition** is spelled zero times and once, never more;
+- the enumeration **stops at 400 phrases** per pattern.
+
+`near_resistance` alone can spell more than 25,000 phrases and 400 are taken,
+so this is not a rounding difference. A fourth bound was worse than a bound: an
+`IN` node spelled only its **first** alternative, so every term pattern joins
+its words with `[ -]` and the corpus contained **zero hyphens** — while the
+phrasing the fourth audit reported was hyphenated. That one is now fixed rather
+than declared: an `IN` node spells all its literal alternatives.
+
+The corpus also generated no sentence terminator and no dotted token anywhere
+near a ruled phrase, which is exactly why several thousand sources could not
+see the boundary defect below. A second generated corpus now covers that
+region specifically: every ruled phrase with a dotted token (`m.a`, `h.4`,
+`a.m`, `1.5`) and with each declared terminator placed **inside** it, at every
+gap between its words. Both corpora assert the same property.
 
 The previous class-level test hand-wrote its carriers and passed while this
 defect was live, because every carrier it contained injected into the slot —
@@ -400,6 +429,88 @@ goes further — a lexicon whose patterns collide **on purpose**, with `closes?`
 declared as a head noun of a PARAMETERISE term whose REFUSE neighbour begins
 `"close to"`. Nothing in it has been written carefully, and the guarantee holds
 anyway, because it is not the patterns that hold it.
+
+## A recognised term is never deleted, only reported
+
+Four repairs, each closing one path and leaving another, and five independent
+audits reporting what is in the end a single root cause: **a recognised term
+was deleted without being reported.** Exactly three rules can stop a recognised
+match resolving, and after the first two repairs they looked like this:
+
+| rule | declares a disposition? | emits a finding? |
+|---|---|---|
+| `unruled_slot_content` | yes — `REFUSE`, `BLOCKING` | yes |
+| `overlap_resolution` | yes — `REFUSE`, `BLOCKING` | yes |
+| `sentence_boundary` | **no** | **no — the match was discarded** |
+
+The third one had a rule, a terminator set and a rationale, and no consequence
+at all. What it did instead of reporting was `continue`, and the effect was the
+same silent exit 0 as the four phrasings before it:
+
+```
+"XAUUSD 15m breakout rules.
+
+I only take a valid m.a breakout of the range."
+  -> exit 0, STRATEGY_INTAKE_DRAFT, nothing unresolved
+
+  control, identical minus the dotted token:
+  "... I only take a valid breakout of the range."
+  -> exit 4, [BLOCKING] good_breakout
+```
+
+`good_breakout` is a **PID line 118** must-not-guess phrase, and the pattern
+matched in both cases — this was deletion, not non-recognition. The entry was
+the decimal exception being too narrow: only digit-`.`-digit was exempt, so
+`m.a`, `h.4`, `4.hour`, `vwap.session` and `a.m` each read as a sentence ending
+mid-word and any match spanning one was judged to cross a boundary. Those are
+the abbreviations **PID lines 104-105** intake actually receives. The
+`PARAMETERISE` side leaked the same way with no adjective anywhere in the term:
+`no_wick_candle` contains no marker word at all, so *every* boundary-crossing
+match of it vanished without even a marker left behind to notice.
+
+Two things are wrong there and only one of them is the tokenisation. The rule
+itself was stated as a single decision when it is two:
+
+> **Declining to read a match as a ruled term is not permission to delete it.**
+> The two decisions are separate and only the first was ever justified.
+
+So a boundary-crossing match is now **refused and reported**, exactly like the
+other two rules: it is not accepted (nothing is suppressed, and everything on
+the far side of the boundary is still scanned freely, which is the concern that
+originally justified discarding it), and it is itemised, with the straddling
+span quoted so a reader can see what happened. `sentence_boundary` declares its
+`disposition`, `severity`, `blocks`, `why_unresolved_template` and
+`resolution_needed` like the other two, and the loader **requires** them: a
+lexicon declaring a rule with no consequence no longer loads.
+
+### The general statement, and a choke point that enforces it
+
+R7 stated its rule as *"overlap resolution may never cause a recognised term to
+go unreported"*. That is one word too narrow, and the missing word is why a
+fourth repair was needed:
+
+> **Nothing may cause a recognised term to go unreported.**
+
+Stating it is what the previous four repairs also did. What is different is
+that it is now **enforced structurally rather than promised**. Every recognised
+match is written into a ledger the moment it is recognised, carrying exactly
+one reason it is accounted for, from a closed set:
+
+`REPORTED_AS_TERM`, `REPORTED_AS_REBASED`, `REPORTED_AS_UNRULED_SLOT`,
+`REPORTED_AS_CONTESTED`, `REPORTED_AS_STRADDLING_A_SENTENCE_BOUNDARY`, and
+`COVERED_END_TO_END_BY_AN_ACCEPTED_RULING`.
+
+Before `analyse` returns, every entry in that ledger is checked against the
+findings **actually emitted**: a reason naming a finding kind must find its
+term in that collection, and the coverage case must still be covered when
+re-tested. There is deliberately **no reason meaning "dropped"**. A sixth
+deletion path added by a future edit either declares a reason and emits a
+finding for it, or every source that exercises it raises
+`UnreportedMatchError` — loudly, in the caller's face, instead of drafting at
+exit 0 with `analyser_limits` claiming nothing recognised survived unruled.
+
+That is the difference between this repair and the four before it. Each of
+those closed the door it could see. This one makes opening a new door fail.
 
 ## Attribution: a parameterisation is never silent
 
@@ -654,10 +765,13 @@ instructive: nothing failed, nothing was reported, and the guarantee read
 exactly as it does now. A term's wildcard slot swallowed recognised
 discretionary language and the scan never looked inside — see "A wildcard slot
 is not ruled text". So the claim is no longer left as prose to be trusted.
-`tests/test_ambiguity.py` asserts it directly, over a generated corpus that
-drops every declared marker family and every `REFUSE` term into every ruled
-term's slot: for each one, either the text is genuinely inside a term's
-LITERAL span, or it is reported. A guarantee that only a human can check is a
+`tests/test_ambiguity.py` asserts it directly, over generated corpora that drop
+every declared marker family and every `REFUSE` term into every position
+relative to every ruled phrase, and that place a terminator or a dotted token
+inside the ruled phrase itself: for each one, every recognised term of **either
+disposition** either resolves, or is genuinely inside a term's LITERAL span, or
+is reported. The `PARAMETERISE` half of that was missing until R8, and it is
+the half `no_wick_candle` fell through. A guarantee that only a human can check is a
 guarantee that stays broken quietly.
 
 Closing that first gap — catching discretionary claims that use no declared
